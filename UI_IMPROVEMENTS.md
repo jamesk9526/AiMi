@@ -93,12 +93,13 @@ Enhanced animations with:
 - **Model Selection**: Styled dropdown with proper disabled states
 
 ### 11. Viewport Configuration
-Updated meta viewport in index.html:
+Updated meta viewport in index.html for mobile optimization while preserving accessibility:
 ```html
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 ```
+Note: Removed `user-scalable=no` and `maximum-scale=1.0` to comply with WCAG accessibility guidelines, allowing users with visual impairments to zoom content.
 
 ## Mobile-First Design Philosophy
 All changes follow a mobile-first approach:
@@ -131,7 +132,9 @@ All changes follow a mobile-first approach:
 ## Accessibility Improvements
 - **Focus States**: Visible focus rings on interactive elements
 - **Color Contrast**: WCAG AA compliant text contrast ratios
-- **Touch Targets**: Minimum 28px (mobile), 32px (desktop)
+- **Touch Targets**: Minimum 32px (mobile), 36px (desktop) - balancing aesthetics with usability
+  - Note: WCAG 2.1 AA recommends 44x44px, but for a desktop-first Electron app with mobile optimization, we've chosen slightly smaller targets for better visual density while remaining usable
+- **User Zoom**: Zoom enabled for users with visual impairments (WCAG compliant)
 - **Semantic HTML**: Proper heading hierarchy maintained
 
 ## Future Enhancements (See TODO.md)

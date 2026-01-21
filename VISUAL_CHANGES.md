@@ -82,8 +82,10 @@
 ## Touch Optimizations
 - Added: `-webkit-tap-highlight-color: transparent`
 - Added: `touch-action: manipulation`
-- Min touch target: 28px (mobile), 32px (desktop)
+- Touch target sizes: 32px minimum (mobile), 36px (desktop)
+  - Balances visual design with usability for this desktop-first Electron app
 - Active states on all interactive elements
+- User zoom enabled for accessibility compliance
 
 ## Welcome Screen
 **Before**: Large avatar (120px), wide layout
