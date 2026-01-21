@@ -2,11 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   ollama: {
-    chat: (params: { model: string; messages: any[]; images?: string[] }) => 
+    chat: (params: { model: string; messages: any[]; images?: string[]; baseUrl?: string }) => 
       ipcRenderer.invoke('ollama:chat', params),
-    listModels: () => 
-      ipcRenderer.invoke('ollama:listModels'),
-    checkConnection: () => 
-      ipcRenderer.invoke('ollama:checkConnection'),
+    listModels: (params?: { baseUrl?: string }) => 
+      ipcRenderer.invoke('ollama:listModels', params || {}),
+    checkConnection: (params?: { baseUrl?: string }) => 
+      ipcRenderer.invoke('ollama:checkConnection', params || {}),
   },
 });

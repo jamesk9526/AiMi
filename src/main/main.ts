@@ -51,10 +51,20 @@ app.on('activate', () => {
   }
 });
 
+const normalizeBaseUrl = (baseUrl?: string) => {
+  const fallback = 'http://localhost:11434';
+  if (!baseUrl || typeof baseUrl !== 'string') {
+    return fallback;
+  }
+  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  return trimmed.length > 0 ? trimmed : fallback;
+};
+
 // IPC Handlers for Ollama API
-ipcMain.handle('ollama:chat', async (event, { model, messages, images }) => {
+ipcMain.handle('ollama:chat', async (event, { model, messages, images, baseUrl }) => {
   try {
-    const response = await axios.post('http://localhost:11434/api/chat', {
+    const apiBaseUrl = normalizeBaseUrl(baseUrl);
+    const response = await axios.post(`${apiBaseUrl}/api/chat`, {
       model: model || 'llama2',
       messages: messages,
       images: images,
@@ -70,18 +80,20 @@ ipcMain.handle('ollama:chat', async (event, { model, messages, images }) => {
   }
 });
 
-ipcMain.handle('ollama:listModels', async () => {
+ipcMain.handle('ollama:listModels', async (event, { baseUrl }) => {
   try {
-    const response = await axios.get('http://localhost:11434/api/tags');
+    const apiBaseUrl = normalizeBaseUrl(baseUrl);
+    const response = await axios.get(`${apiBaseUrl}/api/tags`);
     return { success: true, models: response.data.models };
   } catch (error: any) {
     return { success: false, error: error.message };
   }
 });
 
-ipcMain.handle('ollama:checkConnection', async () => {
+ipcMain.handle('ollama:checkConnection', async (event, { baseUrl }) => {
   try {
-    await axios.get('http://localhost:11434/api/tags');
+    const apiBaseUrl = normalizeBaseUrl(baseUrl);
+    await axios.get(`${apiBaseUrl}/api/tags`);
     return { success: true, connected: true };
   } catch (error) {
     return { success: false, connected: false };

@@ -10,9 +10,9 @@ interface Message {
 
 interface ElectronAPI {
   ollama: {
-    chat: (params: { model: string; messages: any[]; images?: string[] }) => Promise<any>;
-    listModels: () => Promise<any>;
-    checkConnection: () => Promise<any>;
+    chat: (params: { model: string; messages: any[]; images?: string[]; baseUrl?: string }) => Promise<any>;
+    listModels: (params?: { baseUrl?: string }) => Promise<any>;
+    checkConnection: (params?: { baseUrl?: string }) => Promise<any>;
   };
 }
 
@@ -29,31 +29,38 @@ const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [baseUrl, setBaseUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ollamaBaseUrl') || 'http://localhost:11434';
+    } catch {
+      return 'http://localhost:11434';
+    }
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    checkConnection();
-    const interval = setInterval(checkConnection, 30000);
+    checkConnection(baseUrl);
+    const interval = setInterval(() => checkConnection(baseUrl), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [baseUrl]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const checkConnection = async () => {
+  const checkConnection = async (url: string) => {
     try {
-      const result = await window.electronAPI.ollama.checkConnection();
+      const result = await window.electronAPI.ollama.checkConnection({ baseUrl: url });
       setIsConnected(result.connected);
       if (!result.connected) {
-        setError('Ollama is not running. Please start Ollama and restart the app.');
+        setError(`Cannot reach Ollama at ${url}. Please start Ollama or update the URL.`);
       } else {
         setError(null);
       }
     } catch (err) {
       setIsConnected(false);
-      setError('Failed to connect to Ollama');
+      setError(`Failed to connect to Ollama at ${url}`);
     }
   };
 
@@ -80,7 +87,7 @@ const App: React.FC = () => {
   const sendMessage = async () => {
     if (!inputValue.trim() && !selectedImage) return;
     if (!isConnected) {
-      setError('Cannot send message: Ollama is not connected');
+      setError(`Cannot send message: Ollama is not connected at ${baseUrl}`);
       return;
     }
 
@@ -115,6 +122,7 @@ const App: React.FC = () => {
         model: 'llama2',
         messages: messagesToSend,
         images,
+        baseUrl,
       });
 
       setIsTyping(false);
@@ -147,6 +155,18 @@ const App: React.FC = () => {
     setInputValue(suggestion);
   };
 
+  const handleApplyBaseUrl = () => {
+    const trimmed = baseUrl.trim().replace(/\/+$/, '');
+    const next = trimmed.length > 0 ? trimmed : 'http://localhost:11434';
+    setBaseUrl(next);
+    try {
+      localStorage.setItem('ollamaBaseUrl', next);
+    } catch {
+      // ignore storage errors
+    }
+    checkConnection(next);
+  };
+
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('en-US', {
       hour: '2-digit',
@@ -173,6 +193,21 @@ const App: React.FC = () => {
               <span className="status-indicator"></span>
             </h2>
             <p>Your personal AI companion, always here for you</p>
+          </div>
+          <div className="ollama-settings">
+            <div className="ollama-settings-label">Ollama URL</div>
+            <div className="ollama-settings-row">
+              <input
+                className="ollama-url-input"
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="http://192.168.1.10:11434"
+              />
+              <button className="apply-button" onClick={handleApplyBaseUrl}>
+                Apply
+              </button>
+            </div>
           </div>
         </div>
 
