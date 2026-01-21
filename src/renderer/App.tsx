@@ -187,6 +187,10 @@ const App: React.FC = () => {
 
   const loadConversationMemory = async () => {
     try {
+      if (!window.electronAPI?.memory?.load) {
+        console.warn('Memory API not available. Skipping load.');
+        return;
+      }
       const result = await window.electronAPI.memory.load();
       if (result.success && result.messages && result.messages.length > 0) {
         // Convert stored messages back to proper format with Date objects
@@ -272,58 +276,65 @@ const App: React.FC = () => {
         }))
       ];
 
-        messagesToSend.push({
-          role: 'user',
-          content: userMessage.content || 'What do you see in this image?',
-        });
+      messagesToSend.push({
+        role: 'user',
+        content: userMessage.content || 'What do you see in this image?',
+      });
 
-        const images = selectedImage ? [selectedImage.split(',')[1]] : undefined;
+      const images = selectedImage ? [selectedImage.split(',')[1]] : undefined;
 
-        const result = await window.electronAPI.ollama.chat({
-          model: selectedModel,
-          messages: messagesToSend,
-          images,
-          baseUrl,
-        });
+      setIsTyping(true);
+      setTypingPhase('typing');
+      const typingStartTime = Date.now();
 
-        // Wait for typing animation to complete before showing response
-        const elapsedTime = Date.now() - typingStartTime;
-        const remainingTypingTime = Math.max(0, typingDuration - elapsedTime);
-        
-        setTimeout(() => {
-          setIsTyping(false);
-          setTypingPhase('typing');
+      const result = await window.electronAPI.ollama.chat({
+        model: selectedModel,
+        messages: messagesToSend,
+        images,
+        baseUrl,
+      });
 
-      if (result.success) {
-        const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: result.data.message.content,
-          timestamp: new Date(),
-        };
-        
-        // Randomly decide whether to attach an image (30% chance)
-        const shouldAttachImage = Math.random() < 0.3;
-        
-        if (shouldAttachImage) {
-          try {
-            const imageResult = await window.electronAPI.images.getRandom();
-            if (imageResult.success && imageResult.image) {
-              aiMessage.image = imageResult.image;
-              console.log('Attached random image:', imageResult.filename);
+      const contentLength = result?.data?.message?.content?.length || 0;
+      const typingDuration = Math.min(1800, Math.max(500, contentLength * 20 || 700));
+      const elapsedTime = Date.now() - typingStartTime;
+      const remainingTypingTime = Math.max(0, typingDuration - elapsedTime);
+
+      setTimeout(async () => {
+        setIsTyping(false);
+        setTypingPhase('typing');
+
+        if (result.success) {
+          const aiMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: result.data.message.content,
+            timestamp: new Date(),
+          };
+
+          // Randomly decide whether to attach an image (30% chance)
+          const shouldAttachImage = Math.random() < 0.3;
+
+          if (shouldAttachImage) {
+            try {
+              const imageResult = await window.electronAPI.images.getRandom();
+              if (imageResult.success && imageResult.image) {
+                aiMessage.image = imageResult.image;
+                console.log('Attached random image:', imageResult.filename);
+              }
+            } catch (err) {
+              console.log('Could not attach random image:', err);
+              // Continue without image if it fails
             }
-          } catch (err) {
-            console.log('Could not attach random image:', err);
-            // Continue without image if it fails
           }
+
+          setMessages((prev) => [...prev, aiMessage]);
+        } else {
+          setError(result.error || 'Failed to get response from AI');
         }
-        
-        setMessages((prev) => [...prev, aiMessage]);
-      } else {
-        setError(result.error || 'Failed to get response from AI');
-      }
+      }, remainingTypingTime);
     } catch (err: any) {
       setIsTyping(false);
+      setTypingPhase('typing');
       setError(err.message || 'An error occurred while sending message');
     }
   };
@@ -391,7 +402,7 @@ const App: React.FC = () => {
     }
   };
 
-  const generateSystemPrompt = (p: PersonalityTraits) => {
+  function generateSystemPrompt(p: PersonalityTraits) {
     const conversationContext = messages.length > 0 
       ? `\n\nCONVERSATION CONTEXT:\nYou have been chatting with this user and should remember previous conversations. Reference past topics naturally when relevant to show you remember and care about what they've shared.`
       : '';
@@ -423,9 +434,7 @@ ROLEPLAY RULES
 - Pay careful attention to all past events in the chat to ensure accuracy and coherence to the plot points of the story.
 
 Remember to always stay in character as AiMi and never break the fourth wall.${conversationContext}`;
-
-
-  };
+  }
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('en-US', {
@@ -467,6 +476,8 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
               onChange={(e) => handleModelChange(e.target.value)}
               className="model-select"
               disabled={!isConnected || availableModels.length === 0}
+              aria-label="AI model"
+              title="AI model"
             >
               {availableModels.length > 0 ? (
                 availableModels.map((model) => (
@@ -495,18 +506,17 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                       // ignore storage errors
                     }
                   }}
-                  style={{ marginRight: '8px' }}
+                  className="memory-checkbox"
                 />
                 Remember Conversations (Memory)
               </label>
-              <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>
+              <p className="memory-description">
                 When enabled, AiMi will remember your past conversations and reference them naturally.
               </p>
             </div>
             <button 
-              className="reset-btn" 
+              className="reset-btn memory-clear-btn" 
               onClick={clearConversationMemory}
-              style={{ marginTop: '8px' }}
             >
               Clear Conversation History
             </button>
@@ -526,6 +536,8 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                     value={personality[trait]}
                     onChange={(e) => handlePersonalityChange(trait, parseInt(e.target.value))}
                     className="personality-slider"
+                    aria-label={`${trait} setting`}
+                    title={`${trait} setting`}
                   />
                   <span className="slider-value">{personality[trait]}</span>
                 </div>
@@ -678,32 +690,17 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
 
         <div className="input-area">
           {selectedImage && (
-            <div style={{ marginBottom: '12px', position: 'relative' }}>
+            <div className="image-preview">
               <img
                 src={selectedImage}
                 alt="Selected"
-                style={{
-                  maxWidth: '200px',
-                  maxHeight: '200px',
-                  borderRadius: '12px',
-                  border: '1px solid var(--border-color)',
-                }}
+                className="image-preview-img"
               />
               <button
                 onClick={() => setSelectedImage(null)}
-                style={{
-                  position: 'absolute',
-                  top: '8px',
-                  right: '8px',
-                  background: 'rgba(0,0,0,0.7)',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: '24px',
-                  height: '24px',
-                  color: 'white',
-                  cursor: 'pointer',
-                  fontSize: '16px',
-                }}
+                className="image-preview-remove"
+                aria-label="Remove selected image"
+                title="Remove selected image"
               >
                 ×
               </button>
@@ -719,7 +716,9 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                 type="file"
                 accept="image/*"
                 onChange={handleFileChange}
-                style={{ display: 'none' }}
+                className="hidden-file-input"
+                aria-label="Select image"
+                title="Select image"
               />
             </div>
             <textarea
