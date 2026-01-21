@@ -6,6 +6,7 @@ interface Message {
   content: string;
   timestamp: Date;
   image?: string;
+  status?: 'sending' | 'ready' | 'delivered';
 }
 
 interface PersonalityTraits {
@@ -39,6 +40,7 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [typingPhase, setTypingPhase] = useState<'typing' | 'paused'>('typing');
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -174,63 +176,108 @@ const App: React.FC = () => {
       return;
     }
 
+    const userMessageId = Date.now().toString();
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: userMessageId,
       role: 'user',
       content: inputValue.trim(),
       timestamp: new Date(),
       image: selectedImage || undefined,
+      status: 'sending',
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
     setSelectedImage(null);
-    setIsTyping(true);
     setError(null);
 
-    try {
-      const messagesToSend = [
-        {
-          role: 'system',
-          content: generateSystemPrompt(personality)
-        },
-        ...messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        }))
-      ];
+    // Random delay before showing "ready" status (500ms - 2000ms)
+    const readyDelay = Math.random() * 1500 + 500;
+    setTimeout(() => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === userMessageId ? { ...msg, status: 'ready' } : msg
+        )
+      );
+    }, readyDelay);
 
-      messagesToSend.push({
-        role: 'user',
-        content: userMessage.content || 'What do you see in this image?',
-      });
+    // Random delay before showing typing indicator (800ms - 2500ms)
+    const typingStartDelay = Math.random() * 1700 + 800;
+    
+    setTimeout(async () => {
+      setIsTyping(true);
+      setTypingPhase('typing');
 
-      const images = selectedImage ? [selectedImage.split(',')[1]] : undefined;
-
-      const result = await window.electronAPI.ollama.chat({
-        model: selectedModel,
-        messages: messagesToSend,
-        images,
-        baseUrl,
-      });
-
-      setIsTyping(false);
-
-      if (result.success) {
-        const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: result.data.message.content,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, aiMessage]);
-      } else {
-        setError(result.error || 'Failed to get response from AI');
+      // Simulate realistic typing with random pauses
+      const typingDuration = Math.random() * 2000 + 1500; // 1.5-3.5 seconds
+      const pauseCount = Math.floor(Math.random() * 3) + 1; // 1-3 pauses
+      
+      // Schedule random pauses
+      for (let i = 0; i < pauseCount; i++) {
+        const pauseTime = (typingDuration / (pauseCount + 1)) * (i + 1);
+        setTimeout(() => {
+          setTypingPhase('paused');
+          // Resume after a short pause (200-600ms)
+          setTimeout(() => setTypingPhase('typing'), Math.random() * 400 + 200);
+        }, pauseTime);
       }
-    } catch (err: any) {
-      setIsTyping(false);
-      setError(err.message || 'An error occurred while sending message');
-    }
+
+      try {
+        const messagesToSend = [
+          {
+            role: 'system',
+            content: generateSystemPrompt(personality)
+          },
+          ...messages.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+          }))
+        ];
+
+        messagesToSend.push({
+          role: 'user',
+          content: userMessage.content || 'What do you see in this image?',
+        });
+
+        const images = selectedImage ? [selectedImage.split(',')[1]] : undefined;
+
+        const result = await window.electronAPI.ollama.chat({
+          model: selectedModel,
+          messages: messagesToSend,
+          images,
+          baseUrl,
+        });
+
+        // Wait for typing animation to complete before showing response
+        setTimeout(() => {
+          setIsTyping(false);
+          setTypingPhase('typing');
+
+          if (result.success) {
+            const aiMessage: Message = {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: result.data.message.content,
+              timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, aiMessage]);
+            
+            // Mark user message as delivered
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === userMessageId ? { ...msg, status: 'delivered' } : msg
+              )
+            );
+          } else {
+            setError(result.error || 'Failed to get response from AI');
+          }
+        }, Math.max(0, typingDuration - (Date.now() - (Date.now() - typingStartDelay))));
+      } catch (err: any) {
+        setIsTyping(false);
+        setTypingPhase('typing');
+        setError(err.message || 'An error occurred while sending message');
+      }
+    }, typingStartDelay);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -505,7 +552,16 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
                         />
                       )}
                     </div>
-                    <div className="message-time">{formatTime(message.timestamp)}</div>
+                    <div className="message-time">
+                      {formatTime(message.timestamp)}
+                      {message.role === 'user' && message.status && (
+                        <span className={`message-status ${message.status}`}>
+                          {message.status === 'sending' && '●'}
+                          {message.status === 'ready' && '✓'}
+                          {message.status === 'delivered' && '✓✓'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -514,11 +570,19 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
                   <div className="message-avatar">💝</div>
                   <div className="message-content">
                     <div className="message-bubble">
-                      <div className="typing-indicator">
-                        <div className="typing-dot"></div>
-                        <div className="typing-dot"></div>
-                        <div className="typing-dot"></div>
-                      </div>
+                      {typingPhase === 'typing' ? (
+                        <div className="typing-indicator">
+                          <div className="typing-dot"></div>
+                          <div className="typing-dot"></div>
+                          <div className="typing-dot"></div>
+                        </div>
+                      ) : (
+                        <div className="typing-indicator paused">
+                          <div className="typing-dot paused"></div>
+                          <div className="typing-dot paused"></div>
+                          <div className="typing-dot paused"></div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

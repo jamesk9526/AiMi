@@ -487,6 +487,11 @@ body, html {
   animation: typing 1.3s infinite ease-in-out;
 }
 
+.typing-dot.paused {
+  animation: none;
+  opacity: 0.3;
+}
+
 .typing-dot:nth-child(2) {
   animation-delay: 0.15s;
 }
@@ -504,6 +509,24 @@ body, html {
     opacity: 1;
     transform: translateY(-8px);
   }
+}
+
+.message-status {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.message-status.sending {
+  color: #888;
+}
+
+.message-status.ready {
+  color: #4CAF50;
+}
+
+.message-status.delivered {
+  color: #4CAF50;
 }
 
 @media (max-width: 768px) {
