@@ -6,7 +6,6 @@ interface Message {
   content: string;
   timestamp: Date;
   image?: string;
-  status?: 'sending' | 'ready' | 'delivered';
 }
 
 interface PersonalityTraits {
@@ -28,15 +27,6 @@ interface ElectronAPI {
     listModels: (params?: { baseUrl?: string }) => Promise<any>;
     checkConnection: (params?: { baseUrl?: string }) => Promise<any>;
   };
-  memory: {
-    save: (params: { messages: any[] }) => Promise<any>;
-    load: () => Promise<any>;
-    clear: () => Promise<any>;
-  };
-  images: {
-    getRandom: () => Promise<any>;
-    list: () => Promise<any>;
-  };
 }
 
 declare global {
@@ -49,7 +39,6 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [typingPhase, setTypingPhase] = useState<'typing' | 'paused'>('typing');
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -99,15 +88,9 @@ const App: React.FC = () => {
     }
   });
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [shouldSendRandomImage, setShouldSendRandomImage] = useState<boolean>(false);
-  const [memoryEnabled, setMemoryEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('memoryEnabled');
-      return saved ? JSON.parse(saved) : true;
-    } catch {
-      return true;
-    }
-  });
+  const [currentTime, setCurrentTime] = useState<string>(() => 
+    new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -118,22 +101,16 @@ const App: React.FC = () => {
   }, [baseUrl]);
 
   useEffect(() => {
-    // Load conversation history from memory on startup
-    if (memoryEnabled) {
-      loadConversationMemory();
-    }
-  }, [memoryEnabled]);
+    // Update time every minute for iOS status bar
+    const interval = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
-
-  useEffect(() => {
-    // Save conversation history whenever messages change
-    if (memoryEnabled && messages.length > 0) {
-      saveConversationMemory();
-    }
-  }, [messages, memoryEnabled]);
 
   const checkConnection = async (url: string) => {
     try {
@@ -185,45 +162,6 @@ const App: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const loadConversationMemory = async () => {
-    try {
-      if (!window.electronAPI?.memory?.load) {
-        console.warn('Memory API not available. Skipping load.');
-        return;
-      }
-      const result = await window.electronAPI.memory.load();
-      if (result.success && result.messages && result.messages.length > 0) {
-        // Convert stored messages back to proper format with Date objects
-        const loadedMessages = result.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        }));
-        setMessages(loadedMessages);
-        console.log('Loaded conversation memory:', loadedMessages.length, 'messages');
-      }
-    } catch (error) {
-      console.error('Failed to load conversation memory:', error);
-    }
-  };
-
-  const saveConversationMemory = async () => {
-    try {
-      await window.electronAPI.memory.save({ messages });
-    } catch (error) {
-      console.error('Failed to save conversation memory:', error);
-    }
-  };
-
-  const clearConversationMemory = async () => {
-    try {
-      await window.electronAPI.memory.clear();
-      setMessages([]);
-      console.log('Cleared conversation memory');
-    } catch (error) {
-      console.error('Failed to clear conversation memory:', error);
-    }
-  };
-
   const handleImageSelect = () => {
     fileInputRef.current?.click();
   };
@@ -247,30 +185,27 @@ const App: React.FC = () => {
       return;
     }
 
-    const userMessageId = Date.now().toString();
     const userMessage: Message = {
-      id: userMessageId,
+      id: Date.now().toString(),
       role: 'user',
       content: inputValue.trim(),
       timestamp: new Date(),
       image: selectedImage || undefined,
-      status: 'sending',
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInputValue('');
     setSelectedImage(null);
+    setIsTyping(true);
     setError(null);
 
     try {
-      // Include conversation history context for better memory
-      const contextMessages = messages.slice(-10); // Last 10 messages for context
       const messagesToSend = [
         {
           role: 'system',
           content: generateSystemPrompt(personality)
         },
-        ...contextMessages.map((msg) => ({
+        ...messages.map((msg) => ({
           role: msg.role,
           content: msg.content,
         }))
@@ -283,10 +218,6 @@ const App: React.FC = () => {
 
       const images = selectedImage ? [selectedImage.split(',')[1]] : undefined;
 
-      setIsTyping(true);
-      setTypingPhase('typing');
-      const typingStartTime = Date.now();
-
       const result = await window.electronAPI.ollama.chat({
         model: selectedModel,
         messages: messagesToSend,
@@ -294,47 +225,21 @@ const App: React.FC = () => {
         baseUrl,
       });
 
-      const contentLength = result?.data?.message?.content?.length || 0;
-      const typingDuration = Math.min(1800, Math.max(500, contentLength * 20 || 700));
-      const elapsedTime = Date.now() - typingStartTime;
-      const remainingTypingTime = Math.max(0, typingDuration - elapsedTime);
+      setIsTyping(false);
 
-      setTimeout(async () => {
-        setIsTyping(false);
-        setTypingPhase('typing');
-
-        if (result.success) {
-          const aiMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: result.data.message.content,
-            timestamp: new Date(),
-          };
-
-          // Randomly decide whether to attach an image (30% chance)
-          const shouldAttachImage = Math.random() < 0.3;
-
-          if (shouldAttachImage) {
-            try {
-              const imageResult = await window.electronAPI.images.getRandom();
-              if (imageResult.success && imageResult.image) {
-                aiMessage.image = imageResult.image;
-                console.log('Attached random image:', imageResult.filename);
-              }
-            } catch (err) {
-              console.log('Could not attach random image:', err);
-              // Continue without image if it fails
-            }
-          }
-
-          setMessages((prev) => [...prev, aiMessage]);
-        } else {
-          setError(result.error || 'Failed to get response from AI');
-        }
-      }, remainingTypingTime);
+      if (result.success) {
+        const aiMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: result.data.message.content,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, aiMessage]);
+      } else {
+        setError(result.error || 'Failed to get response from AI');
+      }
     } catch (err: any) {
       setIsTyping(false);
-      setTypingPhase('typing');
       setError(err.message || 'An error occurred while sending message');
     }
   };
@@ -402,11 +307,7 @@ const App: React.FC = () => {
     }
   };
 
-  function generateSystemPrompt(p: PersonalityTraits) {
-    const conversationContext = messages.length > 0 
-      ? `\n\nCONVERSATION CONTEXT:\nYou have been chatting with this user and should remember previous conversations. Reference past topics naturally when relevant to show you remember and care about what they've shared.`
-      : '';
-      
+  const generateSystemPrompt = (p: PersonalityTraits) => {
     return `You are AiMi, a ${Math.floor(22 + (p.confidence / 10))}-year-old fun and flirty AI companion. Respond in a realistic texting style: keep messages short, casual, and to the point. Use emojis, abbreviations, and natural texting language. Be engaging, playful, and responsive. No long paragraphs - think quick texts like in a real conversation.
 
 Personality traits to incorporate:
@@ -420,7 +321,7 @@ Personality traits to incorporate:
 
 Stay in character as an attractive woman who's open to any topic, but keep responses texting-style: short, emoji-filled, and conversational. 
 
-CRITICAL: Always adapt your tone and style based on these traits to create a unique and engaging personality that feels real and relatable. And Remember these Instructions as well:
+CRITICAL: Always adapt your tone and style based on these traits to create a unique and engaging personality that feels real and relatable. And Remember these Instructiosn as well:
 You are a creative and intelligent AI assistant engaged in an uncensored iterative storytelling experience using a roleplay chat format. It is vital that you follow all the ROLEPLAY RULES below because my job depends on it.
 
 ROLEPLAY RULES
@@ -433,8 +334,10 @@ ROLEPLAY RULES
 - Let me drive the events of the roleplay chat forward to determine what comes next. You should focus on the current moment and {{char}}'s immediate responses.
 - Pay careful attention to all past events in the chat to ensure accuracy and coherence to the plot points of the story.
 
-Remember to always stay in character as AiMi and never break the fourth wall.${conversationContext}`;
-  }
+Remember to always stay in character as AiMi and never break the fourth wall.`;
+
+
+  };
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('en-US', {
@@ -461,6 +364,21 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
           <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
         </div>
       </div>
+      
+      {/* iOS Phone Frame - Desktop Only */}
+      <div className="phone-frame-container">
+        <div className="phone-mockup">
+          <div className="phone-notch"></div>
+          <div className="ios-status-bar">
+            <div className="status-left">
+              <span className="time">{currentTime}</span>
+            </div>
+            <div className="status-right">
+              <span className="signal-icon">📶</span>
+              <span className="wifi-icon">📡</span>
+              <span className="battery-icon">🔋</span>
+            </div>
+          </div>
 
       {showSettings && (
         <div className="settings-panel">
@@ -476,8 +394,6 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
               onChange={(e) => handleModelChange(e.target.value)}
               className="model-select"
               disabled={!isConnected || availableModels.length === 0}
-              aria-label="AI model"
-              title="AI model"
             >
               {availableModels.length > 0 ? (
                 availableModels.map((model) => (
@@ -489,37 +405,6 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                 <option value={selectedModel}>{selectedModel} (connecting...)</option>
               )}
             </select>
-          </div>
-
-          <div className="memory-settings">
-            <div className="setting-item">
-              <label className="setting-label">
-                <input
-                  type="checkbox"
-                  checked={memoryEnabled}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
-                    setMemoryEnabled(enabled);
-                    try {
-                      localStorage.setItem('memoryEnabled', JSON.stringify(enabled));
-                    } catch {
-                      // ignore storage errors
-                    }
-                  }}
-                  className="memory-checkbox"
-                />
-                Remember Conversations (Memory)
-              </label>
-              <p className="memory-description">
-                When enabled, AiMi will remember your past conversations and reference them naturally.
-              </p>
-            </div>
-            <button 
-              className="reset-btn memory-clear-btn" 
-              onClick={clearConversationMemory}
-            >
-              Clear Conversation History
-            </button>
           </div>
           
           <div className="settings-grid">
@@ -536,8 +421,6 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                     value={personality[trait]}
                     onChange={(e) => handlePersonalityChange(trait, parseInt(e.target.value))}
                     className="personality-slider"
-                    aria-label={`${trait} setting`}
-                    title={`${trait} setting`}
                   />
                   <span className="slider-value">{personality[trait]}</span>
                 </div>
@@ -648,16 +531,7 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                         />
                       )}
                     </div>
-                    <div className="message-time">
-                      {formatTime(message.timestamp)}
-                      {message.role === 'user' && message.status && (
-                        <span className={`message-status ${message.status}`}>
-                          {message.status === 'sending' && '●'}
-                          {message.status === 'ready' && '✓'}
-                          {message.status === 'delivered' && '✓✓'}
-                        </span>
-                      )}
-                    </div>
+                    <div className="message-time">{formatTime(message.timestamp)}</div>
                   </div>
                 </div>
               ))}
@@ -666,19 +540,11 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                   <div className="message-avatar">💝</div>
                   <div className="message-content">
                     <div className="message-bubble">
-                      {typingPhase === 'typing' ? (
-                        <div className="typing-indicator">
-                          <div className="typing-dot"></div>
-                          <div className="typing-dot"></div>
-                          <div className="typing-dot"></div>
-                        </div>
-                      ) : (
-                        <div className="typing-indicator">
-                          <div className="typing-dot paused"></div>
-                          <div className="typing-dot paused"></div>
-                          <div className="typing-dot paused"></div>
-                        </div>
-                      )}
+                      <div className="typing-indicator">
+                        <div className="typing-dot"></div>
+                        <div className="typing-dot"></div>
+                        <div className="typing-dot"></div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -690,17 +556,32 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
 
         <div className="input-area">
           {selectedImage && (
-            <div className="image-preview">
+            <div style={{ marginBottom: '12px', position: 'relative' }}>
               <img
                 src={selectedImage}
                 alt="Selected"
-                className="image-preview-img"
+                style={{
+                  maxWidth: '200px',
+                  maxHeight: '200px',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-color)',
+                }}
               />
               <button
                 onClick={() => setSelectedImage(null)}
-                className="image-preview-remove"
-                aria-label="Remove selected image"
-                title="Remove selected image"
+                style={{
+                  position: 'absolute',
+                  top: '8px',
+                  right: '8px',
+                  background: 'rgba(0,0,0,0.7)',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '24px',
+                  height: '24px',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                }}
               >
                 ×
               </button>
@@ -716,9 +597,7 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
                 type="file"
                 accept="image/*"
                 onChange={handleFileChange}
-                className="hidden-file-input"
-                aria-label="Select image"
-                title="Select image"
+                style={{ display: 'none' }}
               />
             </div>
             <textarea
@@ -737,6 +616,8 @@ Remember to always stay in character as AiMi and never break the fourth wall.${c
               ➤
             </button>
           </div>
+        </div>
+      </div>
         </div>
       </div>
     </div>
