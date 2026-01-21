@@ -27,6 +27,9 @@ interface ElectronAPI {
     listModels: (params?: { baseUrl?: string }) => Promise<any>;
     checkConnection: (params?: { baseUrl?: string }) => Promise<any>;
   };
+  window: {
+    setMode: (mode: 'phone' | 'desktop') => Promise<any>;
+  };
 }
 
 declare global {
@@ -91,6 +94,7 @@ const App: React.FC = () => {
   const [currentTime, setCurrentTime] = useState<string>(() => 
     new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   );
+  const [isExpanded, setIsExpanded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -346,8 +350,18 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
     });
   };
 
+  const handleToggleExpand = async () => {
+    const nextMode: 'phone' | 'desktop' = isExpanded ? 'phone' : 'desktop';
+    setIsExpanded(!isExpanded);
+    try {
+      await window.electronAPI.window.setMode(nextMode);
+    } catch {
+      // ignore if not available
+    }
+  };
+
   return (
-    <div className="app">
+    <div className={`app ${isExpanded ? 'expanded' : ''}`}>
       <div className="title-bar">
         <h1>AiMi - Your AI Companion</h1>
         <div className="title-bar-controls">
@@ -385,6 +399,26 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
           <div className="settings-header">
             <h2>Personality Settings</h2>
             <button className="reset-btn" onClick={resetPersonality}>Reset to Default</button>
+          </div>
+
+          <div className="settings-section">
+            <label className="setting-label">Ollama URL</label>
+            <div className="settings-input-row">
+              <input
+                className="ollama-url-input"
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                onBlur={handleApplyBaseUrl}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleApplyBaseUrl();
+                  }
+                }}
+                placeholder="http://localhost:11434"
+              />
+            </div>
           </div>
           
           <div className="model-selection">
@@ -436,29 +470,19 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
 
       <div className="chat-container">
         <div className="chat-header">
-          <div className="avatar">💝</div>
           <div className="chat-header-info">
             <h2>
               AiMi
               <span className="status-indicator"></span>
             </h2>
-            <p>Your personal AI companion, always here for you</p>
           </div>
-          <div className="ollama-settings">
-            <div className="ollama-settings-label">Ollama URL</div>
-            <div className="ollama-settings-row">
-              <input
-                className="ollama-url-input"
-                type="text"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://192.168.1.10:11434"
-              />
-              <button className="apply-button" onClick={handleApplyBaseUrl}>
-                Apply
-              </button>
-            </div>
-          </div>
+          <button
+            className="expand-toggle"
+            onClick={handleToggleExpand}
+            title={isExpanded ? 'Switch to phone view' : 'Switch to desktop view'}
+          >
+            {isExpanded ? '🗗' : '🗖'}
+          </button>
         </div>
 
         {error && (
@@ -471,7 +495,6 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
         <div className="messages-area">
           {messages.length === 0 ? (
             <div className="welcome-screen">
-              <div className="welcome-avatar">💝</div>
               <h2>Hey there! I'm AiMi</h2>
               <p>
                 Your personal AI companion who's always here to chat, share, and explore
@@ -517,9 +540,6 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
             <>
               {messages.map((message) => (
                 <div key={message.id} className={`message ${message.role}`}>
-                  <div className="message-avatar">
-                    {message.role === 'user' ? '👤' : '💝'}
-                  </div>
                   <div className="message-content">
                     <div className="message-bubble">
                       {message.content}
@@ -537,7 +557,6 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
               ))}
               {isTyping && (
                 <div className="message assistant">
-                  <div className="message-avatar">💝</div>
                   <div className="message-content">
                     <div className="message-bubble">
                       <div className="typing-indicator">
