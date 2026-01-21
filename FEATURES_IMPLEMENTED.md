@@ -163,4 +163,4 @@ Based on the features.md roadmap, potential next steps include:
 - Memory is enabled by default
 - Conversation history is stored locally only (privacy first)
 - Image folder can be customized with user's own images
-- The 30% probability for images can be adjusted in App.tsx (line ~222)
+- The 30% probability for images can be adjusted in App.tsx (around line 297)

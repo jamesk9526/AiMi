@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import axios from 'axios';
 
 let mainWindow: BrowserWindow | null = null;
+let recentlyUsedImages: string[] = []; // Track recently used images to avoid repetition
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -191,8 +192,26 @@ ipcMain.handle('images:getRandom', async () => {
       return { success: false, error: 'No images found in folder' };
     }
     
-    // Select a random image
-    const randomImage = imageFiles[Math.floor(Math.random() * imageFiles.length)];
+    // Select a random image, avoiding recently used ones for better variety
+    let randomImage: string;
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    do {
+      randomImage = imageFiles[Math.floor(Math.random() * imageFiles.length)];
+      attempts++;
+    } while (
+      recentlyUsedImages.includes(randomImage) && 
+      attempts < maxAttempts && 
+      imageFiles.length > 1
+    );
+    
+    // Track this image as recently used (keep last 5)
+    recentlyUsedImages.push(randomImage);
+    if (recentlyUsedImages.length > 5) {
+      recentlyUsedImages.shift();
+    }
+    
     const imagePath = path.join(imagesPath, randomImage);
     
     // Read the image as base64
