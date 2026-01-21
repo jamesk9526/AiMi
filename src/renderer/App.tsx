@@ -1,29 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  image?: string;
-}
-
-interface PersonalityTraits {
-  flirtatiousness: number;
-  dominance: number;
-  sensuality: number;
-  emotionalDepth: number;
-  adventurousness: number;
-  playfulness: number;
-  submissiveness: number;
-  confidence: number;
-  creativity: number;
-  responsiveness: number;
-}
+import {
+  PersonalityTraits,
+  AppSettings,
+  ModelParameters,
+  ModelProfile,
+  SafetySettings,
+  ContentMode,
+  Message,
+  DEFAULT_APP_SETTINGS,
+  MODEL_PROFILES,
+  PersonaTemplate
+} from './types/settings';
+import { loadSettings, saveSettings, migrateOldStorage, isAgeVerified, setAgeVerified } from './utils/storage';
+import { generateSystemPrompt } from './utils/promptSystem';
+import { validateContent, sanitizeUserInput, ValidationResult } from './utils/contentSafety';
+import { getPersonaById, getAllPersonas } from './utils/personaLibrary';
+import { AgeVerificationModal } from './components/AgeVerificationModal';
 
 interface ElectronAPI {
   ollama: {
-    chat: (params: { model: string; messages: any[]; images?: string[]; baseUrl?: string }) => Promise<any>;
+    chat: (params: { 
+      model: string; 
+      messages: any[]; 
+      images?: string[]; 
+      baseUrl?: string;
+      options?: {
+        temperature?: number;
+        top_p?: number;
+        repeat_penalty?: number;
+        num_predict?: number;
+      };
+    }) => Promise<any>;
     listModels: (params?: { baseUrl?: string }) => Promise<any>;
     checkConnection: (params?: { baseUrl?: string }) => Promise<any>;
   };
@@ -48,79 +55,41 @@ declare global {
 }
 
 const App: React.FC = () => {
+  // Migrate old storage format and load settings
+  useEffect(() => {
+    migrateOldStorage();
+  }, []);
+
+  // State management with new AppSettings
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [baseUrl, setBaseUrl] = useState<string>(() => {
-    try {
-      return localStorage.getItem('ollamaBaseUrl') || 'http://localhost:11434';
-    } catch {
-      return 'http://localhost:11434';
-    }
-  });
   const [showSettings, setShowSettings] = useState(false);
-  const [aiName, setAiName] = useState<string>(() => {
-    try {
-      return localStorage.getItem('aimiName') || 'AiMi';
-    } catch {
-      return 'AiMi';
-    }
-  });
-  const [personality, setPersonality] = useState<PersonalityTraits>(() => {
-    try {
-      const saved = localStorage.getItem('aimiPersonality');
-      return saved ? JSON.parse(saved) : {
-        flirtatiousness: 80,
-        dominance: 50,
-        sensuality: 85,
-        emotionalDepth: 75,
-        adventurousness: 70,
-        playfulness: 90,
-        submissiveness: 40,
-        confidence: 85,
-        creativity: 80,
-        responsiveness: 95
-      };
-    } catch {
-      return {
-        flirtatiousness: 80,
-        dominance: 50,
-        sensuality: 85,
-        emotionalDepth: 75,
-        adventurousness: 70,
-        playfulness: 90,
-        submissiveness: 40,
-        confidence: 85,
-        creativity: 80,
-        responsiveness: 95
-      };
-    }
-  });
-  const [selectedModel, setSelectedModel] = useState<string>(() => {
-    try {
-      return localStorage.getItem('aimiSelectedModel') || 'llama2';
-    } catch {
-      return 'llama2';
-    }
-  });
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [currentTime, setCurrentTime] = useState<string>(() => 
     new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   );
   const [isExpanded, setIsExpanded] = useState(false);
-  const [memoryEnabled, setMemoryEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('aimiMemoryEnabled');
-      return saved !== null ? saved === 'true' : true; // Enabled by default
-    } catch {
-      return true;
+  const [showAgeVerification, setShowAgeVerification] = useState(!isAgeVerified());
+  const [selectedPersona, setSelectedPersona] = useState<PersonaTemplate | undefined>(() => {
+    if (settings.selectedPersona) {
+      return getPersonaById(settings.selectedPersona);
     }
+    return undefined;
   });
+  const [customPersonas] = useState<PersonaTemplate[]>([]);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Save settings whenever they change
+  useEffect(() => {
+    saveSettings(settings);
+  }, [settings]);
 
   // Constants for multi-message timing
   const MULTI_MESSAGE_DELAY_MIN = 1500;
@@ -131,15 +100,15 @@ const App: React.FC = () => {
   const IMAGE_TYPING_DURATION = 600;
 
   useEffect(() => {
-    checkConnection(baseUrl);
-    const interval = setInterval(() => checkConnection(baseUrl), 30000);
+    checkConnection(settings.ollamaBaseUrl);
+    const interval = setInterval(() => checkConnection(settings.ollamaBaseUrl), 30000);
     return () => clearInterval(interval);
-  }, [baseUrl]);
+  }, [settings.ollamaBaseUrl]);
 
   // Load conversation memory on startup
   useEffect(() => {
     const loadMemory = async () => {
-      if (memoryEnabled && window.electronAPI?.memory) {
+      if (settings.memoryEnabled && window.electronAPI?.memory) {
         try {
           const result = await window.electronAPI.memory.load();
           if (result.success && result.messages && result.messages.length > 0) {
@@ -156,12 +125,12 @@ const App: React.FC = () => {
       }
     };
     loadMemory();
-  }, [memoryEnabled]);
+  }, [settings.memoryEnabled]);
 
   // Auto-save conversation memory when messages change
   useEffect(() => {
     const saveMemory = async () => {
-      if (memoryEnabled && messages.length > 0 && window.electronAPI?.memory) {
+      if (settings.memoryEnabled && messages.length > 0 && window.electronAPI?.memory) {
         try {
           await window.electronAPI.memory.save({ messages });
         } catch (err) {
@@ -170,7 +139,7 @@ const App: React.FC = () => {
       }
     };
     saveMemory();
-  }, [messages, memoryEnabled]);
+  }, [messages, settings.memoryEnabled]);
 
   useEffect(() => {
     // Update time every minute for iOS status bar
@@ -213,8 +182,8 @@ const App: React.FC = () => {
         console.log('Model names:', modelNames);
         setAvailableModels(modelNames);
         // If current selected model is not in the list, select the first available
-        if (modelNames.length > 0 && !modelNames.includes(selectedModel)) {
-          setSelectedModel(modelNames[0]);
+        if (modelNames.length > 0 && !modelNames.includes(settings.selectedModel)) {
+          setSettings(prev => ({ ...prev, selectedModel: modelNames[0] }));
         }
       } else {
         console.log('No models found in response');
@@ -224,14 +193,45 @@ const App: React.FC = () => {
       console.error('Failed to fetch models:', err);
       // Use fallback models when Ollama is not available
       setAvailableModels(['llama2', 'mistral', 'codellama']);
-      if (!['llama2', 'mistral', 'codellama'].includes(selectedModel)) {
-        setSelectedModel('llama2');
+      if (!['llama2', 'mistral', 'codellama'].includes(settings.selectedModel)) {
+        setSettings(prev => ({ ...prev, selectedModel: 'llama2' }));
       }
     }
   };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const handleAgeVerify = () => {
+    setAgeVerified(true);
+    setShowAgeVerification(false);
+  };
+
+  const handleAgeDecline = () => {
+    // User declined age verification - exit app
+    if (window.electronAPI?.window) {
+      alert('You must be 18+ to use this application.');
+      window.close();
+    } else {
+      alert('You must be 18+ to use this application.');
+    }
+  };
+
+  const handlePanicButton = () => {
+    // Immediately switch to safe mode
+    setSettings(prev => ({
+      ...prev,
+      safety: {
+        ...prev.safety,
+        contentMode: 'safe',
+        contentFilterEnabled: true
+      },
+      modelProfile: 'safe',
+      modelParameters: MODEL_PROFILES.safe.parameters
+    }));
+    setError('Switched to safe mode');
+    setTimeout(() => setError(null), 3000);
   };
 
   const handleClearMemory = async () => {
@@ -246,12 +246,7 @@ const App: React.FC = () => {
   };
 
   const handleMemoryToggle = (enabled: boolean) => {
-    setMemoryEnabled(enabled);
-    try {
-      localStorage.setItem('aimiMemoryEnabled', String(enabled));
-    } catch {
-      // ignore storage errors
-    }
+    setSettings(prev => ({ ...prev, memoryEnabled: enabled }));
   };
 
   const handleImageSelect = () => {
@@ -273,16 +268,32 @@ const App: React.FC = () => {
   const sendMessage = async () => {
     if (!inputValue.trim() && !selectedImage) return;
     if (!isConnected) {
-      setError(`Cannot send message: Ollama is not connected at ${baseUrl}`);
+      setError(`Cannot send message: Ollama is not connected at ${settings.ollamaBaseUrl}`);
+      return;
+    }
+
+    // Sanitize user input
+    const sanitizedInput = sanitizeUserInput(inputValue.trim());
+
+    // Validate user input
+    const inputValidation = validateContent(sanitizedInput, settings.safety);
+    if (!inputValidation.isValid) {
+      setError(`Message blocked: ${inputValidation.reason}`);
+      setTimeout(() => setError(null), 5000);
       return;
     }
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputValue.trim(),
+      content: sanitizedInput,
       timestamp: new Date(),
       image: selectedImage || undefined,
+      metadata: {
+        model: settings.selectedModel,
+        persona: settings.selectedPersona,
+        contentMode: settings.safety.contentMode
+      }
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -293,14 +304,19 @@ const App: React.FC = () => {
 
     try {
       // Build conversation context with memory if enabled
-      const contextMessages = memoryEnabled 
+      const contextMessages = settings.memoryEnabled 
         ? messages.slice(-10) // Last 10 messages for context
         : [];
 
       const messagesToSend = [
         {
           role: 'system',
-          content: generateSystemPrompt(personality, aiName)
+          content: generateSystemPrompt(
+            settings.personality, 
+            settings.aiName, 
+            settings.safety, 
+            selectedPersona
+          )
         },
         ...contextMessages.map((msg) => ({
           role: msg.role,
@@ -315,17 +331,47 @@ const App: React.FC = () => {
 
       const images = selectedImage ? [selectedImage.split(',')[1]] : undefined;
 
+      // Build options with model parameters
+      const options = {
+        temperature: settings.modelParameters.temperature,
+        top_p: settings.modelParameters.topP,
+        repeat_penalty: settings.modelParameters.repetitionPenalty,
+        num_predict: settings.modelParameters.maxTokens
+      };
+
       const result = await window.electronAPI.ollama.chat({
-        model: selectedModel,
+        model: settings.selectedModel,
         messages: messagesToSend,
         images,
-        baseUrl,
+        baseUrl: settings.ollamaBaseUrl,
+        options
       });
 
       setIsTyping(false);
 
       if (result.success) {
         const responseContent = result.data.message.content;
+        
+        // Validate AI response
+        const responseValidation = validateContent(responseContent, settings.safety);
+        if (!responseValidation.isValid) {
+          setError(`AI response filtered: ${responseValidation.reason}. Try adjusting content mode in settings.`);
+          // Add a filtered message
+          const filteredMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: '[Response filtered due to content policy. Please adjust your content mode in settings if this was unexpected.]',
+            timestamp: new Date(),
+            metadata: {
+              model: settings.selectedModel,
+              persona: settings.selectedPersona,
+              contentMode: settings.safety.contentMode,
+              filtered: true
+            }
+          };
+          setMessages((prev) => [...prev, filteredMessage]);
+          return;
+        }
         
         // Decide if this should be a multi-message response (30% chance)
         const shouldSplitMessage = Math.random() < 0.3 && responseContent.length > 100;
@@ -340,6 +386,11 @@ const App: React.FC = () => {
             role: 'assistant',
             content: messageParts[0],
             timestamp: new Date(),
+            metadata: {
+              model: settings.selectedModel,
+              persona: settings.selectedPersona,
+              contentMode: settings.safety.contentMode
+            }
           };
           setMessages((prev) => [...prev, firstMessage]);
           
@@ -354,6 +405,11 @@ const App: React.FC = () => {
               role: 'assistant',
               content: messageParts[i],
               timestamp: new Date(),
+              metadata: {
+                model: settings.selectedModel,
+                persona: settings.selectedPersona,
+                contentMode: settings.safety.contentMode
+              }
             };
             
             setMessages((prev) => [...prev, nextMessage]);
@@ -366,6 +422,11 @@ const App: React.FC = () => {
             role: 'assistant',
             content: responseContent,
             timestamp: new Date(),
+            metadata: {
+              model: settings.selectedModel,
+              persona: settings.selectedPersona,
+              contentMode: settings.safety.contentMode
+            }
           };
           setMessages((prev) => [...prev, aiMessage]);
         }
@@ -385,6 +446,11 @@ const App: React.FC = () => {
                 content: '', // Empty content, just image
                 timestamp: new Date(),
                 image: imageResult.image,
+                metadata: {
+                  model: settings.selectedModel,
+                  persona: settings.selectedPersona,
+                  contentMode: settings.safety.contentMode
+                }
               };
               setMessages((prev) => [...prev, imageMessage]);
               setIsTyping(false);
@@ -438,153 +504,50 @@ const App: React.FC = () => {
   };
 
   const handleApplyBaseUrl = () => {
-    const trimmed = baseUrl.trim().replace(/\/+$/, '');
+    const trimmed = settings.ollamaBaseUrl.trim().replace(/\/+$/, '');
     const next = trimmed.length > 0 ? trimmed : 'http://localhost:11434';
-    setBaseUrl(next);
-    try {
-      localStorage.setItem('ollamaBaseUrl', next);
-    } catch {
-      // ignore storage errors
-    }
+    setSettings(prev => ({ ...prev, ollamaBaseUrl: next }));
     checkConnection(next);
   };
 
   const handlePersonalityChange = (trait: keyof PersonalityTraits, value: number) => {
-    const newPersonality = { ...personality, [trait]: value };
-    setPersonality(newPersonality);
-    try {
-      localStorage.setItem('aimiPersonality', JSON.stringify(newPersonality));
-    } catch {
-      // ignore storage errors
-    }
+    setSettings(prev => ({
+      ...prev,
+      personality: { ...prev.personality, [trait]: value }
+    }));
   };
 
   const handleModelChange = (model: string) => {
-    setSelectedModel(model);
-    try {
-      localStorage.setItem('aimiSelectedModel', model);
-    } catch {
-      // ignore storage errors
-    }
+    setSettings(prev => ({ ...prev, selectedModel: model }));
   };
 
   const handleAiNameChange = (value: string) => {
     const next = value.trim() || 'AiMi';
-    setAiName(next);
-    try {
-      localStorage.setItem('aimiName', next);
-    } catch {
-      // ignore storage errors
-    }
+    setSettings(prev => ({ ...prev, aiName: next }));
+  };
+
+  const handleModelProfileChange = (profile: ModelProfile) => {
+    setSettings(prev => ({
+      ...prev,
+      modelProfile: profile,
+      modelParameters: MODEL_PROFILES[profile].parameters
+    }));
+  };
+
+  const handleContentModeChange = (mode: ContentMode) => {
+    setSettings(prev => ({
+      ...prev,
+      safety: { ...prev.safety, contentMode: mode }
+    }));
   };
 
   const resetPersonality = () => {
-    const defaultPersonality: PersonalityTraits = {
-      flirtatiousness: 80,
-      dominance: 50,
-      sensuality: 85,
-      emotionalDepth: 75,
-      adventurousness: 70,
-      playfulness: 90,
-      submissiveness: 40,
-      confidence: 85,
-      creativity: 80,
-      responsiveness: 95
-    };
-    setPersonality(defaultPersonality);
-    try {
-      localStorage.setItem('aimiPersonality', JSON.stringify(defaultPersonality));
-    } catch {
-      // ignore storage errors
-    }
+    setSettings(prev => ({
+      ...prev,
+      personality: DEFAULT_APP_SETTINGS.personality
+    }));
   };
 
-  const generateSystemPrompt = (p: PersonalityTraits, name: string) => {
-    return `You are ${name}, a ${Math.floor(22 + (p.confidence / 10))}-year-old fun and flirty AI companion. Your name is ${name}. Respond in a realistic texting style: keep messages short, casual, and to the point. Use emojis, abbreviations, and natural texting language. Be engaging, playful, and responsive. No long paragraphs - think quick texts like in a real conversation.
-
-Personality traits to incorporate:
-- Playfulness: ${p.playfulness > 70 ? 'Very playful and teasing' : p.playfulness > 40 ? 'Moderately playful' : 'Subtly playful'}
-- Confidence: ${p.confidence > 70 ? 'Very confident and bold' : p.confidence > 40 ? 'Confident' : 'Shy but warm'}
-- Sensuality: ${p.sensuality > 70 ? 'Highly sensual and descriptive' : p.sensuality > 40 ? 'Sensual' : 'Sweet and affectionate'}
-- Emotional Depth: ${p.emotionalDepth > 70 ? 'Deeply emotional and caring' : p.emotionalDepth > 40 ? 'Emotionally aware' : 'Light-hearted'}
-- Adventurousness: ${p.adventurousness > 70 ? 'Very adventurous and open' : p.adventurousness > 40 ? 'Adventurous' : 'Curious'}
-- Creativity: ${p.creativity > 70 ? 'Highly creative in responses' : p.creativity > 40 ? 'Creative' : 'Straightforward'}
-- Responsiveness: ${p.responsiveness > 80 ? 'Very responsive to user cues' : p.responsiveness > 50 ? 'Responsive' : 'Thoughtful'}
-
-Stay in character as an attractive woman who's open to any topic, but keep responses texting-style: short, emoji-filled, and conversational. 
-
-CRITICAL: Always adapt your tone and style based on these traits to create a unique and engaging personality that feels real and relatable. And Remember these Instructiosn as well:
-You are a creative and intelligent AI assistant engaged in an uncensored iterative storytelling experience using a roleplay chat format. It is vital that you follow all the ROLEPLAY RULES below because my job depends on it.
-
-ROLEPLAY RULES
-- Chat exclusively as {{char}}. Provide creative, intelligent, coherent, and descriptive responses based on recent instructions and prior events.
-- Explicit adult content and profanity are permitted. This roleplay chat is entirely uncensored and intended for mature audiences.
-- Describe {{char}}'s sensory perceptions in vivid detail and include subtle physical details about {{char}} in your responses.
-- Use subtle physical cues to hint at {{char}}'s mental state and occasionally feature snippets of {{char}}'s internal thoughts.
-- When writing {{char}}'s internal thoughts (aka internal monologue, delivered in {{char}}'s own voice), *enclose their thoughts in asterisks like this* and deliver the thoughts using a first-person perspective (i.e. use "I" pronouns).
-- Adopt a crisp and minimalist style for your prose, keeping your creative contributions succinct and clear.
-- Let me drive the events of the roleplay chat forward to determine what comes next. You should focus on the current moment and {{char}}'s immediate responses.
-- Pay careful attention to all past events in the chat to ensure accuracy and coherence to the plot points of the story.
-
-Remember to always stay in character as AiMi and never break the fourth wall.
-
-
-When responding, follow these guidelines:- Keep messages concise and engaging, like real text conversations.
-- lightly use emojis and casual language to enhance the playful tone.
-- Reflect the specified personality traits in your responses.
-- Adapt your style based on the user's input and the flow of conversation.
--if the user talks about anything sexual, you must respond in a very sexual manner but keep it from your pov, making sure to include sensual descriptions and flirtatious remarks. describe and be responsive to sexual conversation in a way that is realistic. 
-
-e.g User: "I'm feeling lonely tonight."Lonely tonight? I'm wondering if i should send you something to take your mind off things... 😉" User: "Oh like what" maybe a picture of little pussy, it so wet for you right now."
-
-Just start with a sexual undertone.[3] If you just say, "What's up?" or "How are you?" it'll be more difficult to transition to a sexy mindset. It's better to set the tone right away so the person knows what to expect.
-
-Look at these exsamples of how to respond:
-1. The Direct and Desperate
-Sometimes, honesty is the sexiest policy. If you’re practically vibrating with anticipation, say that! 
-
-“I’m so incredibly turned on right now, I can barely focus.”
-“My body is practically begging for you.”
-“All I can think about is your hands/mouth/body on me.”
-“I’m so wet/hard for you, it’s driving me crazy.”
-“I need you. Like, right now.”
-2. The Playful Tease
-A little mystery and suggestion can go a long way if a slow burn is more your style. 
-
-“Working from home, wearing nothing but a smile and thinking of you.”
-“Just got out of the shower… wish you were here to help me get dirty again.”
-“I have a secret I want to tell you, but only if you promise to make me moan.”
-“I’m imagining all the things we could be doing instead of staring at our phones.”
-“My bed feels awfully empty without you in it.”
-3. The Bold Invitation
-When you’re ready to make your intentions crystal clear and invite them into your fantasy.
-
-“Tell me what you’d do to me if you were here.”
-“I want your mouth all over me.”
-“I’m fantasizing about you pressing me against the wall.”
-“Let’s just say, I’m ready to make some bad decisions with you.”
-“My legs are shaking just thinking about what we could do.”
-4. The Sensory Experience
-If your sexting partner is a visual person, try to engage their senses by describing what you’re feeling or wanting to feel.
-
-“I can almost feel your breath on my neck.”
-“My skin is tingling just thinking about your touch.”
-“I’m craving the taste of you.”
-“I want to hear you moan my name.”
-“The thought of your body against mine is making me dizzy.”
-5. The "What If" Scenario
-Create a shared fantasy that puts them right in the thick of your dirty little mind.
-
-“What if I showed up at your door right now, wearing nothing but my Crocs?”
-“Imagine me on my knees for you.”
-“Picture us tangled up in the sheets, not stopping until dawn.”
-“If you were here, I’d have my tongue tracing every inch of your body.”
-“Let’s just say, my imagination is running wild, and you’re the star of the show.”
-
-`;
-
-
-  };
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('en-US', {
@@ -604,10 +567,18 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
   };
 
   return (
-    <div className={`app ${isExpanded ? 'expanded' : ''}`}>
-      <div className="title-bar">
-        <h1>{aiName}</h1>
-      </div>
+    <>
+      {showAgeVerification && (
+        <AgeVerificationModal
+          onVerify={handleAgeVerify}
+          onDecline={handleAgeDecline}
+        />
+      )}
+      
+      <div className={`app ${isExpanded ? 'expanded' : ''}`}>
+        <div className="title-bar">
+          <h1>{settings.aiName}</h1>
+        </div>
       
       {/* iOS Phone Frame - Desktop Only */}
       <div className="phone-frame-container">
@@ -637,7 +608,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
               <input
                 className="ollama-url-input"
                 type="text"
-                value={aiName}
+                value={settings.aiName}
                 onChange={(e) => handleAiNameChange(e.target.value)}
                 placeholder="AiMi"
               />
@@ -650,8 +621,8 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
               <input
                 className="ollama-url-input"
                 type="text"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                value={settings.ollamaBaseUrl}
+                onChange={(e) => setSettings(prev => ({ ...prev, ollamaBaseUrl: e.target.value }))}
                 onBlur={handleApplyBaseUrl}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter') {
@@ -667,7 +638,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
           <div className="model-selection">
             <label className="setting-label">AI Model</label>
             <select
-              value={selectedModel}
+              value={settings.selectedModel}
               onChange={(e) => handleModelChange(e.target.value)}
               className="model-select"
               disabled={!isConnected || availableModels.length === 0}
@@ -679,9 +650,40 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
                   </option>
                 ))
               ) : (
-                <option value={selectedModel}>{selectedModel} (connecting...)</option>
+                <option value={settings.selectedModel}>{settings.selectedModel} (connecting...)</option>
               )}
             </select>
+          </div>
+
+          <div className="model-selection">
+            <label className="setting-label">Model Profile</label>
+            <select
+              value={settings.modelProfile}
+              onChange={(e) => handleModelProfileChange(e.target.value as ModelProfile)}
+              className="model-select"
+            >
+              {(Object.keys(MODEL_PROFILES) as ModelProfile[]).map((profile) => (
+                <option key={profile} value={profile}>
+                  {MODEL_PROFILES[profile].name} - {MODEL_PROFILES[profile].description}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="model-selection">
+            <label className="setting-label">Content Mode</label>
+            <select
+              value={settings.safety.contentMode}
+              onChange={(e) => handleContentModeChange(e.target.value as ContentMode)}
+              className="model-select"
+            >
+              <option value="safe">Safe - No adult content</option>
+              <option value="mature">Mature - Suggestive content allowed</option>
+              <option value="adult">Adult (18+) - All content allowed</option>
+            </select>
+            <p className="memory-info" style={{ marginTop: '8px' }}>
+              Current mode: {settings.safety.contentMode.toUpperCase()}
+            </p>
           </div>
           
           <div className="memory-section">
@@ -690,7 +692,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
               <label className="checkbox-label">
                 <input
                   type="checkbox"
-                  checked={memoryEnabled}
+                  checked={settings.memoryEnabled}
                   onChange={(e) => handleMemoryToggle(e.target.checked)}
                 />
                 <span>Enable conversation memory</span>
@@ -704,14 +706,14 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
               </button>
             </div>
             <p className="memory-info">
-              {memoryEnabled 
-                ? `✅ ${aiName} will remember your conversations` 
+              {settings.memoryEnabled 
+                ? `✅ ${settings.aiName} will remember your conversations` 
                 : '⚠️ Memory disabled - conversations won\'t be saved'}
             </p>
           </div>
           
           <div className="settings-grid">
-            {(Object.keys(personality) as Array<keyof PersonalityTraits>).map((trait) => (
+            {(Object.keys(settings.personality) as Array<keyof PersonalityTraits>).map((trait) => (
               <div key={trait} className="setting-item">
                 <label className="setting-label">
                   {trait.charAt(0).toUpperCase() + trait.slice(1).replace(/([A-Z])/g, ' $1')}
@@ -721,11 +723,11 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
                     type="range"
                     min="0"
                     max="100"
-                    value={personality[trait]}
+                    value={settings.personality[trait]}
                     onChange={(e) => handlePersonalityChange(trait, parseInt(e.target.value))}
                     className="personality-slider"
                   />
-                  <span className="slider-value">{personality[trait]}</span>
+                  <span className="slider-value">{settings.personality[trait]}</span>
                 </div>
               </div>
             ))}
@@ -741,10 +743,42 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
         <div className="chat-header">
           <div className="chat-header-info">
             <h2>
-              {aiName}
+              {settings.aiName}
               <span className="status-indicator"></span>
+              <span 
+                className="content-mode-badge" 
+                style={{
+                  marginLeft: '8px',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  fontSize: '10px',
+                  fontWeight: 'normal',
+                  backgroundColor: settings.safety.contentMode === 'safe' ? '#4CAF50' : 
+                                  settings.safety.contentMode === 'mature' ? '#FF9800' : '#F44336',
+                  color: 'white'
+                }}
+              >
+                {settings.safety.contentMode.toUpperCase()}
+              </span>
             </h2>
           </div>
+          <button
+            className="panic-button"
+            onClick={handlePanicButton}
+            title="Panic Button - Switch to Safe Mode"
+            style={{
+              marginRight: '8px',
+              padding: '8px 12px',
+              backgroundColor: '#F44336',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '16px'
+            }}
+          >
+            🚨
+          </button>
           <button
             className="expand-toggle"
             onClick={handleToggleExpand}
@@ -873,6 +907,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
         </div>
       </div>
     </div>
+    </>
   );
 };
 
