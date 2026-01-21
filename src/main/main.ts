@@ -63,15 +63,26 @@ const normalizeBaseUrl = (baseUrl?: string) => {
 };
 
 // IPC Handlers for Ollama API
-ipcMain.handle('ollama:chat', async (event, { model, messages, images, baseUrl }) => {
+ipcMain.handle('ollama:chat', async (event, { model, messages, images, baseUrl, options }) => {
   try {
     const apiBaseUrl = normalizeBaseUrl(baseUrl);
-    const response = await axios.post(`${apiBaseUrl}/api/chat`, {
+    const requestBody: any = {
       model: model || 'llama2',
       messages: messages,
-      images: images,
       stream: false
-    });
+    };
+    
+    // Add images if provided
+    if (images) {
+      requestBody.images = images;
+    }
+    
+    // Add model parameters (temperature, top_p, etc.) if provided
+    if (options) {
+      requestBody.options = options;
+    }
+    
+    const response = await axios.post(`${apiBaseUrl}/api/chat`, requestBody);
     return { success: true, data: response.data };
   } catch (error: any) {
     console.error('Ollama API Error:', error);
