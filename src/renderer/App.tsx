@@ -88,6 +88,9 @@ const App: React.FC = () => {
     }
   });
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [currentTime, setCurrentTime] = useState<string>(() => 
+    new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,6 +99,14 @@ const App: React.FC = () => {
     const interval = setInterval(() => checkConnection(baseUrl), 30000);
     return () => clearInterval(interval);
   }, [baseUrl]);
+
+  useEffect(() => {
+    // Update time every minute for iOS status bar
+    const interval = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
@@ -360,7 +371,7 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
           <div className="phone-notch"></div>
           <div className="ios-status-bar">
             <div className="status-left">
-              <span className="time">{new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+              <span className="time">{currentTime}</span>
             </div>
             <div className="status-right">
               <span className="signal-icon">📶</span>
