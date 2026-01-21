@@ -26,10 +26,10 @@ function createWindow() {
 
   // Load the app
   if (process.env.NODE_ENV === 'development') {
-    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.loadURL('http://localhost:3001');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, 'index.html'));
+    mainWindow.loadFile(path.join(__dirname, '..', 'index.html'));
   }
 
   mainWindow.on('closed', () => {
@@ -83,9 +83,12 @@ ipcMain.handle('ollama:chat', async (event, { model, messages, images, baseUrl }
 ipcMain.handle('ollama:listModels', async (event, { baseUrl }) => {
   try {
     const apiBaseUrl = normalizeBaseUrl(baseUrl);
+    console.log('Main: Fetching models from:', apiBaseUrl);
     const response = await axios.get(`${apiBaseUrl}/api/tags`);
-    return { success: true, models: response.data.models };
+    console.log('Main: Models response:', response.data);
+    return { success: true, data: { models: response.data.models || [] } };
   } catch (error: any) {
+    console.log('Main: Error fetching models:', error.message);
     return { success: false, error: error.message };
   }
 });
