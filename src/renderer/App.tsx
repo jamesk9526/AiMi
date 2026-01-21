@@ -265,14 +265,14 @@ const App: React.FC = () => {
               content: result.data.message.content,
               timestamp: new Date(),
             };
-            setMessages((prev) => [...prev, aiMessage]);
             
-            // Mark user message as delivered
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === userMessageId ? { ...msg, status: 'delivered' } : msg
-              )
-            );
+            // Update both messages in a single state update to avoid race conditions
+            setMessages((prev) => [
+              ...prev.map((msg) =>
+                msg.id === userMessageId ? { ...msg, status: 'delivered' as const } : msg
+              ),
+              aiMessage
+            ]);
           } else {
             setError(result.error || 'Failed to get response from AI');
           }
@@ -582,7 +582,7 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
                           <div className="typing-dot"></div>
                         </div>
                       ) : (
-                        <div className="typing-indicator paused">
+                        <div className="typing-indicator">
                           <div className="typing-dot paused"></div>
                           <div className="typing-dot paused"></div>
                           <div className="typing-dot paused"></div>
