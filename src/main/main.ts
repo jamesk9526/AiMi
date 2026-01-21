@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import axios from 'axios';
 
 let mainWindow: BrowserWindow | null = null;
@@ -100,5 +101,143 @@ ipcMain.handle('ollama:checkConnection', async (event, { baseUrl }) => {
     return { success: true, connected: true };
   } catch (error) {
     return { success: false, connected: false };
+  }
+});
+
+// Memory System - Save conversation history
+ipcMain.handle('memory:save', async (event, { messages }) => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const memoryPath = path.join(userDataPath, 'conversation-memory.json');
+    
+    // Ensure the directory exists
+    const dir = path.dirname(memoryPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    // Save the conversation history
+    fs.writeFileSync(memoryPath, JSON.stringify(messages, null, 2));
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error saving memory:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Memory System - Load conversation history
+ipcMain.handle('memory:load', async () => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const memoryPath = path.join(userDataPath, 'conversation-memory.json');
+    
+    if (fs.existsSync(memoryPath)) {
+      const data = fs.readFileSync(memoryPath, 'utf-8');
+      const messages = JSON.parse(data);
+      return { success: true, messages };
+    }
+    
+    return { success: true, messages: [] };
+  } catch (error: any) {
+    console.error('Error loading memory:', error);
+    return { success: false, error: error.message, messages: [] };
+  }
+});
+
+// Memory System - Clear conversation history
+ipcMain.handle('memory:clear', async () => {
+  try {
+    const userDataPath = app.getPath('userData');
+    const memoryPath = path.join(userDataPath, 'conversation-memory.json');
+    
+    if (fs.existsSync(memoryPath)) {
+      fs.unlinkSync(memoryPath);
+    }
+    
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error clearing memory:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Random Image System - Get a random image from the assets folder
+ipcMain.handle('images:getRandom', async () => {
+  try {
+    // In development, images are in the source directory
+    // In production, they're in the resources directory
+    let imagesPath: string;
+    
+    if (process.env.NODE_ENV === 'development') {
+      imagesPath = path.join(__dirname, '..', '..', 'assets', 'aimi-images');
+    } else {
+      imagesPath = path.join(process.resourcesPath, 'assets', 'aimi-images');
+    }
+    
+    // Check if the directory exists
+    if (!fs.existsSync(imagesPath)) {
+      console.log('Images directory not found:', imagesPath);
+      return { success: false, error: 'Images directory not found' };
+    }
+    
+    // Get all image files
+    const files = fs.readdirSync(imagesPath);
+    const imageFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp'].includes(ext);
+    });
+    
+    if (imageFiles.length === 0) {
+      return { success: false, error: 'No images found in folder' };
+    }
+    
+    // Select a random image
+    const randomImage = imageFiles[Math.floor(Math.random() * imageFiles.length)];
+    const imagePath = path.join(imagesPath, randomImage);
+    
+    // Read the image as base64
+    const imageBuffer = fs.readFileSync(imagePath);
+    const ext = path.extname(randomImage).toLowerCase();
+    let mimeType = 'image/jpeg';
+    
+    if (ext === '.png') mimeType = 'image/png';
+    else if (ext === '.gif') mimeType = 'image/gif';
+    else if (ext === '.svg') mimeType = 'image/svg+xml';
+    else if (ext === '.webp') mimeType = 'image/webp';
+    
+    const base64Image = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+    
+    return { success: true, image: base64Image, filename: randomImage };
+  } catch (error: any) {
+    console.error('Error getting random image:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Random Image System - List all available images
+ipcMain.handle('images:list', async () => {
+  try {
+    let imagesPath: string;
+    
+    if (process.env.NODE_ENV === 'development') {
+      imagesPath = path.join(__dirname, '..', '..', 'assets', 'aimi-images');
+    } else {
+      imagesPath = path.join(process.resourcesPath, 'assets', 'aimi-images');
+    }
+    
+    if (!fs.existsSync(imagesPath)) {
+      return { success: true, images: [] };
+    }
+    
+    const files = fs.readdirSync(imagesPath);
+    const imageFiles = files.filter(file => {
+      const ext = path.extname(file).toLowerCase();
+      return ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp'].includes(ext);
+    });
+    
+    return { success: true, images: imageFiles };
+  } catch (error: any) {
+    console.error('Error listing images:', error);
+    return { success: false, error: error.message, images: [] };
   }
 });
