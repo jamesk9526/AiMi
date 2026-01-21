@@ -16,6 +16,26 @@ import { generateSystemPrompt } from './utils/promptSystem';
 import { validateContent, sanitizeUserInput, ValidationResult } from './utils/contentSafety';
 import { getPersonaById, getAllPersonas } from './utils/personaLibrary';
 import { AgeVerificationModal } from './components/AgeVerificationModal';
+import { ContactList } from './components/ContactList';
+import { AddContactModal } from './components/AddContactModal';
+import { ContactSettingsModal } from './components/ContactSettingsModal';
+import { Contact, ContactMessage, ContactSummary } from './types/contact';
+import {
+  loadContacts,
+  getContactById,
+  createContact,
+  updateContact,
+  deleteContact,
+  toggleContactPin,
+  getActiveContactId,
+  setActiveContactId,
+  loadContactMessages,
+  saveContactMessages,
+  clearContactMessages,
+  getContactSummaries,
+  migrateToContactSystem,
+  initializeContactSystem,
+} from './utils/contactManager';
 
 interface ElectronAPI {
   ollama: {
@@ -58,6 +78,15 @@ const App: React.FC = () => {
   // Migrate old storage format and load settings
   useEffect(() => {
     migrateOldStorage();
+    // Initialize contact system
+    const initContacts = async () => {
+      await migrateToContactSystem();
+      initializeContactSystem();
+      const activeId = getActiveContactId();
+      setActiveContactIdState(activeId);
+      setContacts(getContactSummaries());
+    };
+    initContacts();
   }, []);
 
   // State management with new AppSettings
@@ -83,6 +112,14 @@ const App: React.FC = () => {
     return undefined;
   });
   const [customPersonas] = useState<PersonaTemplate[]>([]);
+  
+  // Contact system state
+  const [contacts, setContacts] = useState<ContactSummary[]>([]);
+  const [activeContactId, setActiveContactIdState] = useState<string | null>(null);
+  const [showAddContactModal, setShowAddContactModal] = useState(false);
+  const [showContactSettingsModal, setShowContactSettingsModal] = useState(false);
+  const [selectedContactForSettings, setSelectedContactForSettings] = useState<Contact | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -110,38 +147,49 @@ const App: React.FC = () => {
   // Load conversation memory on startup
   useEffect(() => {
     const loadMemory = async () => {
-      if (settings.memoryEnabled && window.electronAPI?.memory) {
+      if (settings.memoryEnabled && activeContactId) {
         try {
-          const result = await window.electronAPI.memory.load();
-          if (result.success && result.messages && result.messages.length > 0) {
-            // Convert timestamps back to Date objects
-            const loadedMessages = result.messages.map((msg: any) => ({
-              ...msg,
-              timestamp: new Date(msg.timestamp),
-            }));
-            setMessages(loadedMessages);
-          }
+          // Load messages from contact storage
+          const contactMessages = loadContactMessages(activeContactId);
+          // Convert to Message format
+          const loadedMessages: Message[] = contactMessages.map((msg) => ({
+            id: msg.id,
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+            image: msg.image,
+          }));
+          setMessages(loadedMessages);
         } catch (err) {
-          console.error('Failed to load memory:', err);
+          console.error('Failed to load contact messages:', err);
         }
       }
     };
     loadMemory();
-  }, [settings.memoryEnabled]);
+  }, [settings.memoryEnabled, activeContactId]);
 
   // Auto-save conversation memory when messages change
   useEffect(() => {
     const saveMemory = async () => {
-      if (settings.memoryEnabled && messages.length > 0 && window.electronAPI?.memory) {
+      if (settings.memoryEnabled && messages.length > 0 && activeContactId) {
         try {
-          await window.electronAPI.memory.save({ messages });
+          // Convert to ContactMessage format and save
+          const contactMessages: ContactMessage[] = messages.map((msg) => ({
+            id: msg.id,
+            contactId: activeContactId,
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+            image: msg.image,
+          }));
+          saveContactMessages(activeContactId, contactMessages);
         } catch (err) {
-          console.error('Failed to save memory:', err);
+          console.error('Failed to save contact messages:', err);
         }
       }
     };
     saveMemory();
-  }, [messages, settings.memoryEnabled]);
+  }, [messages, settings.memoryEnabled, activeContactId]);
 
   useEffect(() => {
     // Update time every minute for iOS status bar
@@ -247,18 +295,148 @@ const App: React.FC = () => {
   };
 
   const handleClearMemory = async () => {
-    if (window.electronAPI?.memory) {
-      try {
-        await window.electronAPI.memory.clear();
-        setMessages([]);
-      } catch (err) {
-        console.error('Failed to clear memory:', err);
-      }
+    if (activeContactId) {
+      clearContactMessages(activeContactId);
+      setMessages([]);
+      setContacts(getContactSummaries());
     }
   };
 
   const handleMemoryToggle = (enabled: boolean) => {
     setSettings(prev => ({ ...prev, memoryEnabled: enabled }));
+  };
+
+  // Contact handlers
+  const handleSelectContact = (contactId: string) => {
+    if (contactId === activeContactId) return;
+    
+    // Switch to new contact
+    setActiveContactId(contactId);
+    setActiveContactIdState(contactId);
+    
+    // Load messages for this contact
+    const contactMessages = loadContactMessages(contactId);
+    const loadedMessages: Message[] = contactMessages.map((msg) => ({
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp,
+      image: msg.image,
+    }));
+    setMessages(loadedMessages);
+    
+    // Update contact settings from the contact's data
+    const contact = getContactById(contactId);
+    if (contact) {
+      setSettings(prev => ({
+        ...prev,
+        aiName: contact.name,
+        personality: contact.personality,
+        selectedModel: contact.model,
+        modelParameters: contact.modelParameters,
+        modelProfile: contact.modelProfile,
+      }));
+    }
+    
+    setSidebarOpen(false);
+  };
+
+  const handleCreateContact = (contactData: {
+    name: string;
+    description?: string;
+    avatar?: string;
+    mode: 'learner' | 'pre-trained';
+    personality?: PersonalityTraits;
+    modelProfile?: ModelProfile;
+    personaId?: string;
+    systemPromptAddition?: string;
+  }) => {
+    const newContact = createContact({
+      ...contactData,
+      model: settings.selectedModel,
+      modelParameters: settings.modelParameters,
+    });
+    
+    setContacts(getContactSummaries());
+    handleSelectContact(newContact.id);
+    setShowAddContactModal(false);
+  };
+
+  const handleUpdateContactSettings = (contactId: string, updates: Partial<Contact>) => {
+    updateContact(contactId, updates);
+    setContacts(getContactSummaries());
+    
+    // If updating the active contact, refresh its settings
+    if (contactId === activeContactId) {
+      const contact = getContactById(contactId);
+      if (contact) {
+        setSettings(prev => ({
+          ...prev,
+          aiName: contact.name,
+          personality: contact.personality,
+          selectedModel: contact.model,
+          modelParameters: contact.modelParameters,
+          modelProfile: contact.modelProfile,
+        }));
+      }
+    }
+    
+    setShowContactSettingsModal(false);
+    setSelectedContactForSettings(null);
+  };
+
+  const handleDeleteContact = (contactId: string) => {
+    if (confirm('Are you sure you want to delete this contact? All messages will be lost.')) {
+      deleteContact(contactId);
+      setContacts(getContactSummaries());
+      
+      // If deleting active contact, switch to another
+      if (contactId === activeContactId) {
+        const remaining = loadContacts();
+        if (remaining.length > 0) {
+          handleSelectContact(remaining[0].id);
+        } else {
+          // Create a default contact
+          const defaultContact = createContact({
+            name: 'AiMi',
+            description: 'Your AI companion',
+            avatar: '💖',
+            mode: 'learner',
+            model: settings.selectedModel,
+            modelParameters: settings.modelParameters,
+          });
+          setContacts(getContactSummaries());
+          handleSelectContact(defaultContact.id);
+        }
+      }
+      
+      setShowContactSettingsModal(false);
+      setSelectedContactForSettings(null);
+    }
+  };
+
+  const handleToggleContactPin = (contactId: string) => {
+    toggleContactPin(contactId);
+    setContacts(getContactSummaries());
+  };
+
+  const handleOpenContactSettings = (contactId: string) => {
+    const contact = getContactById(contactId);
+    if (contact) {
+      setSelectedContactForSettings(contact);
+      setShowContactSettingsModal(true);
+    }
+  };
+
+  const handleClearContactMessages = (contactId: string) => {
+    if (confirm('Are you sure you want to clear all messages for this contact?')) {
+      clearContactMessages(contactId);
+      setContacts(getContactSummaries());
+      
+      if (contactId === activeContactId) {
+        setMessages([]);
+      }
+    }
   };
 
   const handleImageSelect = () => {
@@ -587,6 +765,27 @@ const App: React.FC = () => {
         />
       )}
       
+      {/* Contact Modals */}
+      <AddContactModal
+        isOpen={showAddContactModal}
+        onClose={() => setShowAddContactModal(false)}
+        onCreate={handleCreateContact}
+        availablePersonas={getAllPersonas()}
+      />
+      
+      <ContactSettingsModal
+        isOpen={showContactSettingsModal}
+        contact={selectedContactForSettings}
+        onClose={() => {
+          setShowContactSettingsModal(false);
+          setSelectedContactForSettings(null);
+        }}
+        onSave={handleUpdateContactSettings}
+        onDelete={handleDeleteContact}
+        onClearMessages={handleClearContactMessages}
+        onTogglePin={handleToggleContactPin}
+      />
+      
       <div className={`app ${isExpanded ? 'expanded' : ''}`}>
         <div className="title-bar">
           <h1>{settings.aiName}</h1>
@@ -606,6 +805,19 @@ const App: React.FC = () => {
               <span className="battery-icon">🔋</span>
             </div>
           </div>
+
+      {/* App Layout with Sidebar */}
+      <div className="app-layout">
+        <div className={`app-sidebar ${sidebarOpen ? 'open' : ''}`}>
+          <ContactList
+            contacts={contacts}
+            activeContactId={activeContactId}
+            onSelectContact={handleSelectContact}
+            onAddContact={() => setShowAddContactModal(true)}
+          />
+        </div>
+        
+        <div className="app-main">
 
       {showSettings && (
         <div className="settings-panel">
@@ -754,8 +966,23 @@ const App: React.FC = () => {
       <div className="chat-container">
         <div className="chat-header">
           <div className="chat-header-info">
+            <button 
+              className="sidebar-toggle"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              title="Toggle contacts"
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '20px',
+                cursor: 'pointer',
+                marginRight: '8px',
+                padding: '4px'
+              }}
+            >
+              ☰
+            </button>
             <h2>
-              {settings.aiName}
+              {activeContactId && getContactById(activeContactId)?.avatar} {settings.aiName}
               <span className="status-indicator"></span>
               <span 
                 className="content-mode-badge" 
@@ -785,6 +1012,20 @@ const App: React.FC = () => {
             </button>
             {showHeaderMenu && (
               <div className="menu-dropdown" role="menu">
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    if (activeContactId) {
+                      handleOpenContactSettings(activeContactId);
+                    }
+                    setShowHeaderMenu(false);
+                  }}
+                  role="menuitem"
+                  title="Contact Settings"
+                >
+                  <span className="menu-icon">👤</span>
+                  <span className="menu-label">Contact Settings</span>
+                </button>
                 <button
                   className="menu-item"
                   onClick={() => {
@@ -935,6 +1176,8 @@ const App: React.FC = () => {
           </div>
         </div>
       </div>
+        </div> {/* End app-main */}
+      </div> {/* End app-layout */}
         </div>
       </div>
     </div>

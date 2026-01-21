@@ -69,29 +69,80 @@ body, html {
 
 .app {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100vh;
   background: transparent;
+  width: 100%;
 }
 
-@media (min-width: 769px) {
+/* Mobile-first: stack vertically */
+@media (max-width: 768px) {
   .app {
-    max-width: 390px;
-    margin: 0 auto;
+    flex-direction: column;
   }
 }
 
-@media (min-width: 769px) {
-  .app.expanded {
-    max-width: 100%;
-    margin: 0;
+/* Desktop: side-by-side layout */
+.app-sidebar {
+  width: 320px;
+  min-width: 280px;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+}
+
+/* Hide sidebar on mobile by default, show when needed */
+@media (max-width: 768px) {
+  .app-sidebar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 85%;
+    max-width: 320px;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+  }
+  
+  .app-sidebar.open {
+    transform: translateX(0);
   }
 }
 
-/* Hide title bar on desktop (will show phone mockup instead) */
-@media (min-width: 769px) {
-  .title-bar {
-    display: none;
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Overlay for mobile when sidebar is open */
+.sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sidebar-overlay {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  
+  .sidebar-overlay.visible {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 
@@ -1791,5 +1842,54 @@ body, html {
   
   .parameter-description {
     font-size: 10px;
+  }
+}
+
+/* App Layout with Sidebar */
+.app-layout {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.app-sidebar {
+  width: 300px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  overflow-y: auto;
+  transition: transform 0.3s ease;
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Mobile sidebar */
+@media (max-width: 768px) {
+  .app-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 1000;
+    transform: translateX(-100%);
+  }
+  
+  .app-sidebar.open {
+    transform: translateX(0);
+  }
+}
+
+.sidebar-toggle {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .sidebar-toggle {
+    display: inline-block;
   }
 }
