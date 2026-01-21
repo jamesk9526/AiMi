@@ -73,7 +73,7 @@ export function createContact(params: {
 }): Contact {
   const now = new Date();
   const contact: Contact = {
-    id: `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    id: `contact_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
     name: params.name,
     description: params.description,
     avatar: params.avatar || '👤',
@@ -257,7 +257,7 @@ export function addContactMessage(contactId: string, message: Omit<ContactMessag
   
   const newMessage: ContactMessage = {
     ...message,
-    id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
     contactId,
     timestamp: new Date(),
   };
@@ -365,7 +365,7 @@ export async function migrateToContactSystem(): Promise<void> {
         
         // Convert old messages to contact messages
         const contactMessages: ContactMessage[] = result.messages.map((msg: any) => ({
-          id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
           contactId: defaultContact.id,
           role: msg.role,
           content: msg.content,
