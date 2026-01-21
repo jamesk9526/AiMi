@@ -112,10 +112,16 @@ const App: React.FC = () => {
       return true;
     }
   });
-  const [isMultiMessageMode, setIsMultiMessageMode] = useState(false);
-  const [pendingMessages, setPendingMessages] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Constants for multi-message timing
+  const MULTI_MESSAGE_DELAY_MIN = 1500;
+  const MULTI_MESSAGE_DELAY_RANGE = 1000;
+  const TYPING_INDICATOR_DURATION = 800;
+  const IMAGE_DELAY_MIN = 1000;
+  const IMAGE_DELAY_RANGE = 1000;
+  const IMAGE_TYPING_DURATION = 600;
 
   useEffect(() => {
     checkConnection(baseUrl);
@@ -332,9 +338,9 @@ const App: React.FC = () => {
           
           // Queue remaining messages with delays
           for (let i = 1; i < messageParts.length; i++) {
-            await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1000)); // 1.5-2.5s delay
+            await new Promise(resolve => setTimeout(resolve, MULTI_MESSAGE_DELAY_MIN + Math.random() * MULTI_MESSAGE_DELAY_RANGE));
             setIsTyping(true);
-            await new Promise(resolve => setTimeout(resolve, 800)); // Show typing indicator
+            await new Promise(resolve => setTimeout(resolve, TYPING_INDICATOR_DURATION));
             
             const nextMessage: Message = {
               id: (Date.now() + i + 1).toString(),
@@ -362,9 +368,9 @@ const App: React.FC = () => {
           try {
             const imageResult = await window.electronAPI.images.getRandom();
             if (imageResult.success && imageResult.image) {
-              await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000)); // 1-2s delay
+              await new Promise(resolve => setTimeout(resolve, IMAGE_DELAY_MIN + Math.random() * IMAGE_DELAY_RANGE));
               setIsTyping(true);
-              await new Promise(resolve => setTimeout(resolve, 600)); // Show typing indicator
+              await new Promise(resolve => setTimeout(resolve, IMAGE_TYPING_DURATION));
               
               const imageMessage: Message = {
                 id: (Date.now() + 100).toString(),
@@ -391,8 +397,10 @@ const App: React.FC = () => {
 
   // Helper function to split message into natural parts
   const splitIntoNaturalParts = (text: string): string[] => {
-    // Split at sentence boundaries, emojis, or newlines
-    const sentences = text.match(/[^.!?]+[.!?]+[\s]*/g) || [text];
+    // Split at sentence boundaries, but try to avoid common abbreviations
+    // This regex looks for sentence-ending punctuation followed by whitespace or newlines
+    // It also tries to avoid splitting on common abbreviations
+    const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z])/g).filter(s => s.trim());
     
     if (sentences.length <= 1) {
       return [text];
@@ -406,7 +414,7 @@ const App: React.FC = () => {
     for (let i = 0; i < numParts; i++) {
       const start = i * sentencesPerPart;
       const end = Math.min(start + sentencesPerPart, sentences.length);
-      const part = sentences.slice(start, end).join('').trim();
+      const part = sentences.slice(start, end).join(' ').trim();
       if (part) {
         parts.push(part);
       }
