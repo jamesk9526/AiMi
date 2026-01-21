@@ -353,6 +353,21 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
           <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
         </div>
       </div>
+      
+      {/* iOS Phone Frame - Desktop Only */}
+      <div className="phone-frame-container">
+        <div className="phone-mockup">
+          <div className="phone-notch"></div>
+          <div className="ios-status-bar">
+            <div className="status-left">
+              <span className="time">{new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
+            </div>
+            <div className="status-right">
+              <span className="signal-icon">📶</span>
+              <span className="wifi-icon">📡</span>
+              <span className="battery-icon">🔋</span>
+            </div>
+          </div>
 
       {showSettings && (
         <div className="settings-panel">
@@ -590,6 +605,8 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
               ➤
             </button>
           </div>
+        </div>
+      </div>
         </div>
       </div>
     </div>
