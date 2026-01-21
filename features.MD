@@ -225,7 +225,7 @@ Behavioral Guidelines:
 
 #### C. Knowledge & Interests
 - **Topic Expertise**: Deep knowledge in personality-relevant areas
-- **Current Awareness**: General knowledge about world (pre-2023)
+- **Current Awareness**: General knowledge up to the model's training cutoff
 - **Learning Together**: Explore new topics with user
 - **Teaching Moments**: Explain things in accessible ways
 - **Curiosity**: Ask questions to learn more
