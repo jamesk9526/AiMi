@@ -74,6 +74,7 @@ const App: React.FC = () => {
     new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   );
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showAgeVerification, setShowAgeVerification] = useState(!isAgeVerified());
   const [selectedPersona, setSelectedPersona] = useState<PersonaTemplate | undefined>(() => {
     if (settings.selectedPersona) {
@@ -85,6 +86,7 @@ const App: React.FC = () => {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
 
   // Save settings whenever they change
   useEffect(() => {
@@ -148,6 +150,16 @@ const App: React.FC = () => {
     }, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showHeaderMenu && headerMenuRef.current && !headerMenuRef.current.contains(event.target as Node)) {
+        setShowHeaderMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showHeaderMenu]);
 
   useEffect(() => {
     scrollToBottom();
@@ -762,37 +774,56 @@ const App: React.FC = () => {
               </span>
             </h2>
           </div>
-          <button
-            className="panic-button"
-            onClick={handlePanicButton}
-            title="Panic Button - Switch to Safe Mode"
-            style={{
-              marginRight: '8px',
-              padding: '8px 12px',
-              backgroundColor: '#F44336',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '16px'
-            }}
-          >
-            🚨
-          </button>
-          <button
-            className="expand-toggle"
-            onClick={handleToggleExpand}
-            title={isExpanded ? 'Switch to phone view' : 'Switch to desktop view'}
-          >
-            {isExpanded ? '🗗' : '🗖'}
-          </button>
-          <button
-            className="settings-toggle"
-            onClick={() => setShowSettings(!showSettings)}
-            title="Personality Settings"
-          >
-            ⚙️
-          </button>
+          <div className="chat-header-actions" ref={headerMenuRef}>
+            <button
+              className="menu-toggle"
+              onClick={() => setShowHeaderMenu((prev) => !prev)}
+              aria-label="Open menu"
+              aria-expanded={showHeaderMenu}
+            >
+              ⋯
+            </button>
+            {showHeaderMenu && (
+              <div className="menu-dropdown" role="menu">
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    handlePanicButton();
+                    setShowHeaderMenu(false);
+                  }}
+                  role="menuitem"
+                  title="Panic Button - Switch to Safe Mode"
+                >
+                  <span className="menu-icon">🚨</span>
+                  <span className="menu-label">Panic Mode</span>
+                </button>
+                <button
+                  className="menu-item menu-item-desktop"
+                  onClick={() => {
+                    handleToggleExpand();
+                    setShowHeaderMenu(false);
+                  }}
+                  role="menuitem"
+                  title={isExpanded ? 'Switch to phone view' : 'Switch to desktop view'}
+                >
+                  <span className="menu-icon">{isExpanded ? '🗗' : '🗖'}</span>
+                  <span className="menu-label">{isExpanded ? 'Phone view' : 'Desktop view'}</span>
+                </button>
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    setShowSettings(!showSettings);
+                    setShowHeaderMenu(false);
+                  }}
+                  role="menuitem"
+                  title="Personality Settings"
+                >
+                  <span className="menu-icon">⚙️</span>
+                  <span className="menu-label">Settings</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {error && (
