@@ -30,6 +30,15 @@ interface ElectronAPI {
   window: {
     setMode: (mode: 'phone' | 'desktop') => Promise<any>;
   };
+  memory: {
+    save: (params: { messages: any[] }) => Promise<any>;
+    load: () => Promise<any>;
+    clear: () => Promise<any>;
+  };
+  images: {
+    getRandom: () => Promise<any>;
+    list: () => Promise<any>;
+  };
 }
 
 declare global {
@@ -95,6 +104,16 @@ const App: React.FC = () => {
     new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
   );
   const [isExpanded, setIsExpanded] = useState(false);
+  const [memoryEnabled, setMemoryEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('aimiMemoryEnabled');
+      return saved !== null ? saved === 'true' : true; // Enabled by default
+    } catch {
+      return true;
+    }
+  });
+  const [isMultiMessageMode, setIsMultiMessageMode] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -103,6 +122,42 @@ const App: React.FC = () => {
     const interval = setInterval(() => checkConnection(baseUrl), 30000);
     return () => clearInterval(interval);
   }, [baseUrl]);
+
+  // Load conversation memory on startup
+  useEffect(() => {
+    const loadMemory = async () => {
+      if (memoryEnabled && window.electronAPI?.memory) {
+        try {
+          const result = await window.electronAPI.memory.load();
+          if (result.success && result.messages && result.messages.length > 0) {
+            // Convert timestamps back to Date objects
+            const loadedMessages = result.messages.map((msg: any) => ({
+              ...msg,
+              timestamp: new Date(msg.timestamp),
+            }));
+            setMessages(loadedMessages);
+          }
+        } catch (err) {
+          console.error('Failed to load memory:', err);
+        }
+      }
+    };
+    loadMemory();
+  }, [memoryEnabled]);
+
+  // Auto-save conversation memory when messages change
+  useEffect(() => {
+    const saveMemory = async () => {
+      if (memoryEnabled && messages.length > 0 && window.electronAPI?.memory) {
+        try {
+          await window.electronAPI.memory.save({ messages });
+        } catch (err) {
+          console.error('Failed to save memory:', err);
+        }
+      }
+    };
+    saveMemory();
+  }, [messages, memoryEnabled]);
 
   useEffect(() => {
     // Update time every minute for iOS status bar
@@ -166,6 +221,26 @@ const App: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const handleClearMemory = async () => {
+    if (window.electronAPI?.memory) {
+      try {
+        await window.electronAPI.memory.clear();
+        setMessages([]);
+      } catch (err) {
+        console.error('Failed to clear memory:', err);
+      }
+    }
+  };
+
+  const handleMemoryToggle = (enabled: boolean) => {
+    setMemoryEnabled(enabled);
+    try {
+      localStorage.setItem('aimiMemoryEnabled', String(enabled));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   const handleImageSelect = () => {
     fileInputRef.current?.click();
   };
@@ -204,12 +279,17 @@ const App: React.FC = () => {
     setError(null);
 
     try {
+      // Build conversation context with memory if enabled
+      const contextMessages = memoryEnabled 
+        ? messages.slice(-10) // Last 10 messages for context
+        : [];
+
       const messagesToSend = [
         {
           role: 'system',
           content: generateSystemPrompt(personality)
         },
-        ...messages.map((msg) => ({
+        ...contextMessages.map((msg) => ({
           role: msg.role,
           content: msg.content,
         }))
@@ -232,13 +312,74 @@ const App: React.FC = () => {
       setIsTyping(false);
 
       if (result.success) {
-        const aiMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: result.data.message.content,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, aiMessage]);
+        const responseContent = result.data.message.content;
+        
+        // Decide if this should be a multi-message response (30% chance)
+        const shouldSplitMessage = Math.random() < 0.3 && responseContent.length > 100;
+        
+        if (shouldSplitMessage) {
+          // Split the message into 2-3 parts naturally
+          const messageParts = splitIntoNaturalParts(responseContent);
+          
+          // Send first message immediately
+          const firstMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: messageParts[0],
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, firstMessage]);
+          
+          // Queue remaining messages with delays
+          for (let i = 1; i < messageParts.length; i++) {
+            await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1000)); // 1.5-2.5s delay
+            setIsTyping(true);
+            await new Promise(resolve => setTimeout(resolve, 800)); // Show typing indicator
+            
+            const nextMessage: Message = {
+              id: (Date.now() + i + 1).toString(),
+              role: 'assistant',
+              content: messageParts[i],
+              timestamp: new Date(),
+            };
+            
+            setMessages((prev) => [...prev, nextMessage]);
+            setIsTyping(false);
+          }
+        } else {
+          // Single message response
+          const aiMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'assistant',
+            content: responseContent,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, aiMessage]);
+        }
+        
+        // 30% chance to send a random image after the message(s)
+        if (window.electronAPI?.images && Math.random() < 0.3) {
+          try {
+            const imageResult = await window.electronAPI.images.getRandom();
+            if (imageResult.success && imageResult.image) {
+              await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000)); // 1-2s delay
+              setIsTyping(true);
+              await new Promise(resolve => setTimeout(resolve, 600)); // Show typing indicator
+              
+              const imageMessage: Message = {
+                id: (Date.now() + 100).toString(),
+                role: 'assistant',
+                content: '', // Empty content, just image
+                timestamp: new Date(),
+                image: imageResult.image,
+              };
+              setMessages((prev) => [...prev, imageMessage]);
+              setIsTyping(false);
+            }
+          } catch (err) {
+            console.error('Failed to get random image:', err);
+          }
+        }
       } else {
         setError(result.error || 'Failed to get response from AI');
       }
@@ -246,6 +387,32 @@ const App: React.FC = () => {
       setIsTyping(false);
       setError(err.message || 'An error occurred while sending message');
     }
+  };
+
+  // Helper function to split message into natural parts
+  const splitIntoNaturalParts = (text: string): string[] => {
+    // Split at sentence boundaries, emojis, or newlines
+    const sentences = text.match(/[^.!?]+[.!?]+[\s]*/g) || [text];
+    
+    if (sentences.length <= 1) {
+      return [text];
+    }
+    
+    // Group sentences into 2-3 message parts
+    const numParts = Math.min(3, Math.ceil(sentences.length / 2));
+    const parts: string[] = [];
+    const sentencesPerPart = Math.ceil(sentences.length / numParts);
+    
+    for (let i = 0; i < numParts; i++) {
+      const start = i * sentencesPerPart;
+      const end = Math.min(start + sentencesPerPart, sentences.length);
+      const part = sentences.slice(start, end).join('').trim();
+      if (part) {
+        parts.push(part);
+      }
+    }
+    
+    return parts.length > 0 ? parts : [text];
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -494,6 +661,32 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
                 <option value={selectedModel}>{selectedModel} (connecting...)</option>
               )}
             </select>
+          </div>
+          
+          <div className="memory-section">
+            <label className="setting-label">Remember Conversations (Memory)</label>
+            <div className="memory-controls">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={memoryEnabled}
+                  onChange={(e) => handleMemoryToggle(e.target.checked)}
+                />
+                <span>Enable conversation memory</span>
+              </label>
+              <button 
+                className="clear-memory-btn"
+                onClick={handleClearMemory}
+                disabled={messages.length === 0}
+              >
+                Clear Conversation History
+              </button>
+            </div>
+            <p className="memory-info">
+              {memoryEnabled 
+                ? '✅ AiMi will remember your conversations' 
+                : '⚠️ Memory disabled - conversations won\'t be saved'}
+            </p>
           </div>
           
           <div className="settings-grid">

@@ -23,4 +23,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: () => 
       ipcRenderer.invoke('images:list'),
   },
+  window: {
+    setMode: (mode: 'phone' | 'desktop') => 
+      ipcRenderer.invoke('window:setMode', mode),
+  },
 });

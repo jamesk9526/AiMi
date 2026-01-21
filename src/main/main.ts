@@ -260,3 +260,23 @@ ipcMain.handle('images:list', async () => {
     return { success: false, error: error.message, images: [] };
   }
 });
+
+// Window mode handler - resize window based on mode
+ipcMain.handle('window:setMode', async (event, mode: 'phone' | 'desktop') => {
+  try {
+    if (!mainWindow) {
+      return { success: false, error: 'Window not found' };
+    }
+
+    if (mode === 'phone') {
+      mainWindow.setSize(420, 900);
+    } else {
+      mainWindow.setSize(1200, 800);
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error setting window mode:', error);
+    return { success: false, error: error.message };
+  }
+});
