@@ -207,6 +207,8 @@ const App: React.FC = () => {
     setTimeout(async () => {
       setIsTyping(true);
       setTypingPhase('typing');
+      
+      const typingStartTime = Date.now();
 
       // Simulate realistic typing with random pauses
       const typingDuration = Math.random() * 2000 + 1500; // 1.5-3.5 seconds
@@ -249,6 +251,9 @@ const App: React.FC = () => {
         });
 
         // Wait for typing animation to complete before showing response
+        const elapsedTime = Date.now() - typingStartTime;
+        const remainingTypingTime = Math.max(0, typingDuration - elapsedTime);
+        
         setTimeout(() => {
           setIsTyping(false);
           setTypingPhase('typing');
@@ -271,7 +276,7 @@ const App: React.FC = () => {
           } else {
             setError(result.error || 'Failed to get response from AI');
           }
-        }, Math.max(0, typingDuration - (Date.now() - (Date.now() - typingStartDelay))));
+        }, remainingTypingTime);
       } catch (err: any) {
         setIsTyping(false);
         setTypingPhase('typing');
