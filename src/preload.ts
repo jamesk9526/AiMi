@@ -9,4 +9,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     checkConnection: (params?: { baseUrl?: string }) => 
       ipcRenderer.invoke('ollama:checkConnection', params || {}),
   },
+  memory: {
+    save: (params: { messages: any[] }) => 
+      ipcRenderer.invoke('memory:save', params),
+    load: () => 
+      ipcRenderer.invoke('memory:load'),
+    clear: () => 
+      ipcRenderer.invoke('memory:clear'),
+  },
+  images: {
+    getRandom: () => 
+      ipcRenderer.invoke('images:getRandom'),
+    list: () => 
+      ipcRenderer.invoke('images:list'),
+  },
 });

@@ -28,6 +28,15 @@ interface ElectronAPI {
     listModels: (params?: { baseUrl?: string }) => Promise<any>;
     checkConnection: (params?: { baseUrl?: string }) => Promise<any>;
   };
+  memory: {
+    save: (params: { messages: any[] }) => Promise<any>;
+    load: () => Promise<any>;
+    clear: () => Promise<any>;
+  };
+  images: {
+    getRandom: () => Promise<any>;
+    list: () => Promise<any>;
+  };
 }
 
 declare global {
@@ -90,6 +99,15 @@ const App: React.FC = () => {
     }
   });
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [shouldSendRandomImage, setShouldSendRandomImage] = useState<boolean>(false);
+  const [memoryEnabled, setMemoryEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('memoryEnabled');
+      return saved ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,8 +118,22 @@ const App: React.FC = () => {
   }, [baseUrl]);
 
   useEffect(() => {
+    // Load conversation history from memory on startup
+    if (memoryEnabled) {
+      loadConversationMemory();
+    }
+  }, [memoryEnabled]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    // Save conversation history whenever messages change
+    if (memoryEnabled && messages.length > 0) {
+      saveConversationMemory();
+    }
+  }, [messages, memoryEnabled]);
 
   const checkConnection = async (url: string) => {
     try {
@@ -153,6 +185,41 @@ const App: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const loadConversationMemory = async () => {
+    try {
+      const result = await window.electronAPI.memory.load();
+      if (result.success && result.messages && result.messages.length > 0) {
+        // Convert stored messages back to proper format with Date objects
+        const loadedMessages = result.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+        setMessages(loadedMessages);
+        console.log('Loaded conversation memory:', loadedMessages.length, 'messages');
+      }
+    } catch (error) {
+      console.error('Failed to load conversation memory:', error);
+    }
+  };
+
+  const saveConversationMemory = async () => {
+    try {
+      await window.electronAPI.memory.save({ messages });
+    } catch (error) {
+      console.error('Failed to save conversation memory:', error);
+    }
+  };
+
+  const clearConversationMemory = async () => {
+    try {
+      await window.electronAPI.memory.clear();
+      setMessages([]);
+      console.log('Cleared conversation memory');
+    } catch (error) {
+      console.error('Failed to clear conversation memory:', error);
+    }
+  };
+
   const handleImageSelect = () => {
     fileInputRef.current?.click();
   };
@@ -191,50 +258,19 @@ const App: React.FC = () => {
     setSelectedImage(null);
     setError(null);
 
-    // Random delay before showing "ready" status (500ms - 2000ms)
-    const readyDelay = Math.random() * 1500 + 500;
-    setTimeout(() => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === userMessageId ? { ...msg, status: 'ready' } : msg
-        )
-      );
-    }, readyDelay);
-
-    // Random delay before showing typing indicator (800ms - 2500ms)
-    const typingStartDelay = Math.random() * 1700 + 800;
-    
-    setTimeout(async () => {
-      setIsTyping(true);
-      setTypingPhase('typing');
-      
-      const typingStartTime = Date.now();
-
-      // Simulate realistic typing with random pauses
-      const typingDuration = Math.random() * 2000 + 1500; // 1.5-3.5 seconds
-      const pauseCount = Math.floor(Math.random() * 3) + 1; // 1-3 pauses
-      
-      // Schedule random pauses
-      for (let i = 0; i < pauseCount; i++) {
-        const pauseTime = (typingDuration / (pauseCount + 1)) * (i + 1);
-        setTimeout(() => {
-          setTypingPhase('paused');
-          // Resume after a short pause (200-600ms)
-          setTimeout(() => setTypingPhase('typing'), Math.random() * 400 + 200);
-        }, pauseTime);
-      }
-
-      try {
-        const messagesToSend = [
-          {
-            role: 'system',
-            content: generateSystemPrompt(personality)
-          },
-          ...messages.map((msg) => ({
-            role: msg.role,
-            content: msg.content,
-          }))
-        ];
+    try {
+      // Include conversation history context for better memory
+      const contextMessages = messages.slice(-10); // Last 10 messages for context
+      const messagesToSend = [
+        {
+          role: 'system',
+          content: generateSystemPrompt(personality)
+        },
+        ...contextMessages.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        }))
+      ];
 
         messagesToSend.push({
           role: 'user',
@@ -258,31 +294,38 @@ const App: React.FC = () => {
           setIsTyping(false);
           setTypingPhase('typing');
 
-          if (result.success) {
-            const aiMessage: Message = {
-              id: (Date.now() + 1).toString(),
-              role: 'assistant',
-              content: result.data.message.content,
-              timestamp: new Date(),
-            };
-            
-            // Update both messages in a single state update to avoid race conditions
-            setMessages((prev) => [
-              ...prev.map((msg) =>
-                msg.id === userMessageId ? { ...msg, status: 'delivered' as const } : msg
-              ),
-              aiMessage
-            ]);
-          } else {
-            setError(result.error || 'Failed to get response from AI');
+      if (result.success) {
+        const aiMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: result.data.message.content,
+          timestamp: new Date(),
+        };
+        
+        // Randomly decide whether to attach an image (30% chance)
+        const shouldAttachImage = Math.random() < 0.3;
+        
+        if (shouldAttachImage) {
+          try {
+            const imageResult = await window.electronAPI.images.getRandom();
+            if (imageResult.success && imageResult.image) {
+              aiMessage.image = imageResult.image;
+              console.log('Attached random image:', imageResult.filename);
+            }
+          } catch (err) {
+            console.log('Could not attach random image:', err);
+            // Continue without image if it fails
           }
-        }, remainingTypingTime);
-      } catch (err: any) {
-        setIsTyping(false);
-        setTypingPhase('typing');
-        setError(err.message || 'An error occurred while sending message');
+        }
+        
+        setMessages((prev) => [...prev, aiMessage]);
+      } else {
+        setError(result.error || 'Failed to get response from AI');
       }
-    }, typingStartDelay);
+    } catch (err: any) {
+      setIsTyping(false);
+      setError(err.message || 'An error occurred while sending message');
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -349,6 +392,10 @@ const App: React.FC = () => {
   };
 
   const generateSystemPrompt = (p: PersonalityTraits) => {
+    const conversationContext = messages.length > 0 
+      ? `\n\nCONVERSATION CONTEXT:\nYou have been chatting with this user and should remember previous conversations. Reference past topics naturally when relevant to show you remember and care about what they've shared.`
+      : '';
+      
     return `You are AiMi, a ${Math.floor(22 + (p.confidence / 10))}-year-old fun and flirty AI companion. Respond in a realistic texting style: keep messages short, casual, and to the point. Use emojis, abbreviations, and natural texting language. Be engaging, playful, and responsive. No long paragraphs - think quick texts like in a real conversation.
 
 Personality traits to incorporate:
@@ -362,7 +409,7 @@ Personality traits to incorporate:
 
 Stay in character as an attractive woman who's open to any topic, but keep responses texting-style: short, emoji-filled, and conversational. 
 
-CRITICAL: Always adapt your tone and style based on these traits to create a unique and engaging personality that feels real and relatable. And Remember these Instructiosn as well:
+CRITICAL: Always adapt your tone and style based on these traits to create a unique and engaging personality that feels real and relatable. And Remember these Instructions as well:
 You are a creative and intelligent AI assistant engaged in an uncensored iterative storytelling experience using a roleplay chat format. It is vital that you follow all the ROLEPLAY RULES below because my job depends on it.
 
 ROLEPLAY RULES
@@ -375,7 +422,7 @@ ROLEPLAY RULES
 - Let me drive the events of the roleplay chat forward to determine what comes next. You should focus on the current moment and {{char}}'s immediate responses.
 - Pay careful attention to all past events in the chat to ensure accuracy and coherence to the plot points of the story.
 
-Remember to always stay in character as AiMi and never break the fourth wall.`;
+Remember to always stay in character as AiMi and never break the fourth wall.${conversationContext}`;
 
 
   };
@@ -431,6 +478,38 @@ Remember to always stay in character as AiMi and never break the fourth wall.`;
                 <option value={selectedModel}>{selectedModel} (connecting...)</option>
               )}
             </select>
+          </div>
+
+          <div className="memory-settings">
+            <div className="setting-item">
+              <label className="setting-label">
+                <input
+                  type="checkbox"
+                  checked={memoryEnabled}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setMemoryEnabled(enabled);
+                    try {
+                      localStorage.setItem('memoryEnabled', JSON.stringify(enabled));
+                    } catch {
+                      // ignore storage errors
+                    }
+                  }}
+                  style={{ marginRight: '8px' }}
+                />
+                Remember Conversations (Memory)
+              </label>
+              <p style={{ fontSize: '12px', color: '#888', marginTop: '4px' }}>
+                When enabled, AiMi will remember your past conversations and reference them naturally.
+              </p>
+            </div>
+            <button 
+              className="reset-btn" 
+              onClick={clearConversationMemory}
+              style={{ marginTop: '8px' }}
+            >
+              Clear Conversation History
+            </button>
           </div>
           
           <div className="settings-grid">
