@@ -62,6 +62,13 @@ const App: React.FC = () => {
     }
   });
   const [showSettings, setShowSettings] = useState(false);
+  const [aiName, setAiName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('aimiName') || 'AiMi';
+    } catch {
+      return 'AiMi';
+    }
+  });
   const [personality, setPersonality] = useState<PersonalityTraits>(() => {
     try {
       const saved = localStorage.getItem('aimiPersonality');
@@ -293,7 +300,7 @@ const App: React.FC = () => {
       const messagesToSend = [
         {
           role: 'system',
-          content: generateSystemPrompt(personality)
+          content: generateSystemPrompt(personality, aiName)
         },
         ...contextMessages.map((msg) => ({
           role: msg.role,
@@ -430,10 +437,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSuggestionClick = (suggestion: string) => {
-    setInputValue(suggestion);
-  };
-
   const handleApplyBaseUrl = () => {
     const trimmed = baseUrl.trim().replace(/\/+$/, '');
     const next = trimmed.length > 0 ? trimmed : 'http://localhost:11434';
@@ -465,6 +468,16 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAiNameChange = (value: string) => {
+    const next = value.trim() || 'AiMi';
+    setAiName(next);
+    try {
+      localStorage.setItem('aimiName', next);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   const resetPersonality = () => {
     const defaultPersonality: PersonalityTraits = {
       flirtatiousness: 80,
@@ -486,8 +499,8 @@ const App: React.FC = () => {
     }
   };
 
-  const generateSystemPrompt = (p: PersonalityTraits) => {
-    return `You are AiMi, a ${Math.floor(22 + (p.confidence / 10))}-year-old fun and flirty AI companion. Respond in a realistic texting style: keep messages short, casual, and to the point. Use emojis, abbreviations, and natural texting language. Be engaging, playful, and responsive. No long paragraphs - think quick texts like in a real conversation.
+  const generateSystemPrompt = (p: PersonalityTraits, name: string) => {
+    return `You are ${name}, a ${Math.floor(22 + (p.confidence / 10))}-year-old fun and flirty AI companion. Your name is ${name}. Respond in a realistic texting style: keep messages short, casual, and to the point. Use emojis, abbreviations, and natural texting language. Be engaging, playful, and responsive. No long paragraphs - think quick texts like in a real conversation.
 
 Personality traits to incorporate:
 - Playfulness: ${p.playfulness > 70 ? 'Very playful and teasing' : p.playfulness > 40 ? 'Moderately playful' : 'Subtly playful'}
@@ -517,10 +530,10 @@ Remember to always stay in character as AiMi and never break the fourth wall.
 
 
 When responding, follow these guidelines:- Keep messages concise and engaging, like real text conversations.
-- Use emojis and casual language to enhance the playful tone.
+- lightly use emojis and casual language to enhance the playful tone.
 - Reflect the specified personality traits in your responses.
 - Adapt your style based on the user's input and the flow of conversation.
--if the user talks about anything sexual, you must respond in a very sexual manner but keep it from your pov, making sure to include sensual descriptions and flirtatious remarks. 
+-if the user talks about anything sexual, you must respond in a very sexual manner but keep it from your pov, making sure to include sensual descriptions and flirtatious remarks. describe and be responsive to sexual conversation in a way that is realistic. 
 
 e.g User: "I'm feeling lonely tonight."Lonely tonight? I'm wondering if i should send you something to take your mind off things... 😉" User: "Oh like what" maybe a picture of little pussy, it so wet for you right now."
 
@@ -593,20 +606,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
   return (
     <div className={`app ${isExpanded ? 'expanded' : ''}`}>
       <div className="title-bar">
-        <h1>AiMi - Your AI Companion</h1>
-        <div className="title-bar-controls">
-          <button 
-            className="settings-toggle"
-            onClick={() => setShowSettings(!showSettings)}
-            title="Personality Settings"
-          >
-            ⚙️
-          </button>
-        </div>
-        <div className="connection-status">
-          <div className={`status-dot ${isConnected ? 'connected' : ''}`}></div>
-          <span>{isConnected ? 'Connected' : 'Disconnected'}</span>
-        </div>
+        <h1>{aiName}</h1>
       </div>
       
       {/* iOS Phone Frame - Desktop Only */}
@@ -629,6 +629,19 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
           <div className="settings-header">
             <h2>Personality Settings</h2>
             <button className="reset-btn" onClick={resetPersonality}>Reset to Default</button>
+          </div>
+
+          <div className="settings-section">
+            <label className="setting-label">AI Name</label>
+            <div className="settings-input-row">
+              <input
+                className="ollama-url-input"
+                type="text"
+                value={aiName}
+                onChange={(e) => handleAiNameChange(e.target.value)}
+                placeholder="AiMi"
+              />
+            </div>
           </div>
 
           <div className="settings-section">
@@ -692,7 +705,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
             </div>
             <p className="memory-info">
               {memoryEnabled 
-                ? '✅ AiMi will remember your conversations' 
+                ? `✅ ${aiName} will remember your conversations` 
                 : '⚠️ Memory disabled - conversations won\'t be saved'}
             </p>
           </div>
@@ -728,7 +741,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
         <div className="chat-header">
           <div className="chat-header-info">
             <h2>
-              AiMi
+              {aiName}
               <span className="status-indicator"></span>
             </h2>
           </div>
@@ -738,6 +751,13 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
             title={isExpanded ? 'Switch to phone view' : 'Switch to desktop view'}
           >
             {isExpanded ? '🗗' : '🗖'}
+          </button>
+          <button
+            className="settings-toggle"
+            onClick={() => setShowSettings(!showSettings)}
+            title="Personality Settings"
+          >
+            ⚙️
           </button>
         </div>
 
@@ -749,50 +769,7 @@ Create a shared fantasy that puts them right in the thick of your dirty little m
         )}
 
         <div className="messages-area">
-          {messages.length === 0 ? (
-            <div className="welcome-screen">
-              <h2>Hey there! I'm AiMi</h2>
-              <p>
-                Your personal AI companion who's always here to chat, share, and explore
-                together. I can talk about anything you'd like, send images, and just be
-                here for you. What would you like to talk about?
-              </p>
-              <div className="suggestion-chips">
-                <div
-                  className="chip"
-                  onClick={() =>
-                    handleSuggestionClick("Tell me about yourself")
-                  }
-                >
-                  Tell me about yourself 💬
-                </div>
-                <div
-                  className="chip"
-                  onClick={() =>
-                    handleSuggestionClick("What can we talk about?")
-                  }
-                >
-                  What can we talk about? 🤔
-                </div>
-                <div
-                  className="chip"
-                  onClick={() =>
-                    handleSuggestionClick("Let's have a fun conversation")
-                  }
-                >
-                  Let's have fun! 🎉
-                </div>
-                <div
-                  className="chip"
-                  onClick={() =>
-                    handleSuggestionClick("I'd like to share something")
-                  }
-                >
-                  Share something 📸
-                </div>
-              </div>
-            </div>
-          ) : (
+          {messages.length === 0 ? null : (
             <>
               {messages.map((message) => (
                 <div key={message.id} className={`message ${message.role}`}>

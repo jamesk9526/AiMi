@@ -97,15 +97,16 @@ body, html {
 
 /* Title Bar */
 .title-bar {
-  height: 40px;
-  background: var(--bg-secondary);
+  height: 44px;
+  background: rgba(18, 18, 20, 0.95);
   display: flex;
   align-items: center;
   justify-content: center;
   -webkit-app-region: drag;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   position: relative;
   user-select: none;
+  letter-spacing: 0.2px;
 }
 
 @media (max-width: 768px) {
@@ -115,13 +116,10 @@ body, html {
 }
 
 .title-bar h1 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  background: var(--gradient-1);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  letter-spacing: -0.2px;
+  color: var(--text-primary);
+  letter-spacing: 0.1px;
 }
 
 @media (max-width: 768px) {
@@ -199,13 +197,13 @@ body, html {
 
 /* Chat Header */
 .chat-header {
-  padding: 16px 20px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  padding: 14px 20px;
+  background: rgba(18, 18, 20, 0.98);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
+  position: relative;
 }
 
 @media (max-width: 768px) {
@@ -299,14 +297,21 @@ body, html {
 }
 
 .chat-header-info {
-  flex: 1;
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
 }
 
 .chat-header-info h2 {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
-  margin-bottom: 2px;
-  letter-spacing: -0.3px;
+  margin-bottom: 0;
+  letter-spacing: 0.1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 768px) {
@@ -350,6 +355,11 @@ body, html {
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.chat-header .expand-toggle,
+.chat-header .settings-toggle {
+  z-index: 1;
 }
 
 .expand-toggle:hover {
