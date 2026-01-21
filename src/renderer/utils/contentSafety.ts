@@ -249,8 +249,13 @@ export function logSafetyEvent(
     return;
   }
   
-  // In a real implementation, this would write to a secure log
-  console.log('[Safety Audit]', event);
+  // In a real implementation, this would write to a secure log file
+  // For now, we log to console only in development
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[Safety Audit]', event);
+  }
+  
+  // TODO: Implement secure file-based logging
 }
 
 /**

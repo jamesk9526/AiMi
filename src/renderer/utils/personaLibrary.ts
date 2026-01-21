@@ -7,7 +7,7 @@
  * IMPORTANT: Personas extend the base system prompt, they never replace it.
  */
 
-import { PersonaTemplate, DEFAULT_PERSONALITY } from '../types/settings';
+import { PersonaTemplate, DEFAULT_PERSONALITY, PersonalityTraits, ModelProfile } from '../types/settings';
 
 // ────────────────────────────────────────
 // BUILT-IN PERSONA TEMPLATES
@@ -173,9 +173,9 @@ export function getAllPersonas(customPersonas: PersonaTemplate[] = []): PersonaT
 export function createCustomPersona(
   name: string,
   description: string,
-  personality: any,
+  personality: PersonalityTraits,
   systemPromptAddition?: string,
-  modelProfile: any = 'balanced'
+  modelProfile: ModelProfile = 'balanced'
 ): PersonaTemplate {
   return {
     id: `custom-${Date.now()}`,
